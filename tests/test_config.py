@@ -11,6 +11,7 @@ from pose2sim_gui.config import (
     parse_toml_value,
     selected_stages_to_runall_kwargs,
     validate_toml_text,
+    validate_stage_prerequisites,
 )
 
 
@@ -84,6 +85,21 @@ class ConfigTests(unittest.TestCase):
                 _, created_again = ensure_project_config(project)
                 self.assertFalse(created_again)
                 self.assertIn("120", config_path.read_text(encoding="utf-8"))
+
+    def test_stage_prerequisites_require_calibration_file_for_3d_stages(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            (project / "calibration").mkdir()
+
+            errors = validate_stage_prerequisites(project, ["poseEstimation", "personAssociation", "triangulation"])
+            self.assertEqual(len(errors), 1)
+            self.assertIn("没有 .toml 标定文件", errors[0])
+
+            self.assertEqual(validate_stage_prerequisites(project, ["poseEstimation", "synchronization"]), [])
+            self.assertEqual(validate_stage_prerequisites(project, ["calibration", "personAssociation"]), [])
+
+            (project / "calibration" / "Calib.toml").write_text("[calibration]\n", encoding="utf-8")
+            self.assertEqual(validate_stage_prerequisites(project, ["personAssociation", "triangulation"]), [])
 
 
 if __name__ == "__main__":

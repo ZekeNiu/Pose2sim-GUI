@@ -56,6 +56,7 @@ from .config import (
     save_config_text,
     set_nested,
     validate_toml_text,
+    validate_stage_prerequisites,
 )
 from .help_text import HELP_TEXTS, MANUAL_TEXT, STAGE_LABELS
 from .reports import default_report_dir, export_excel, export_html, find_mot_files, find_report_video_files
@@ -993,6 +994,10 @@ class Pose2SimMainWindow(QMainWindow):
         stages = [stage for stage, check in self.stage_checks.items() if check.isChecked()]
         if not stages:
             self._message("未选择流程步骤", "请至少选择一个 Pose2Sim 处理步骤。")
+            return
+        prerequisite_errors = validate_stage_prerequisites(self.project_dir, stages)
+        if prerequisite_errors:
+            self._message("无法运行流程", "\n\n".join(prerequisite_errors))
             return
 
         self.pipeline_log.clear()

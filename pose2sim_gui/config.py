@@ -30,6 +30,8 @@ RUNALL_FLAGS: dict[str, str] = {
     "kinematics": "do_kinematics",
 }
 
+CALIBRATION_FILE_REQUIRED_STAGES: tuple[str, ...] = ("personAssociation", "triangulation")
+
 POSE_MODELS: tuple[str, ...] = (
     "Body_with_feet",
     "Whole_body_wrist",
@@ -119,6 +121,28 @@ def ensure_standard_project_folders(project_dir: Path) -> list[Path]:
         folder.mkdir(parents=True, exist_ok=True)
         created_or_existing.append(folder)
     return created_or_existing
+
+
+def calibration_toml_files(project_dir: Path) -> list[Path]:
+    calibration_dir = Path(project_dir).resolve() / "calibration"
+    if not calibration_dir.is_dir():
+        return []
+    return sorted(file for file in calibration_dir.glob("*.toml") if file.is_file())
+
+
+def validate_stage_prerequisites(project_dir: Path, stages: Iterable[str]) -> list[str]:
+    selected = set(stages)
+    errors: list[str] = []
+    calibration_required = selected.intersection(CALIBRATION_FILE_REQUIRED_STAGES)
+    if calibration_required and "calibration" not in selected and not calibration_toml_files(project_dir):
+        stage_names = ", ".join(stage for stage in STAGES if stage in calibration_required)
+        errors.append(
+            "当前选择了需要相机标定文件的步骤："
+            f"{stage_names}。但项目 calibration/ 文件夹中没有 .toml 标定文件，且本次没有勾选“相机校准”。"
+            "请先完成相机校准生成 Calib.toml，或导入/转换已有标定文件；如果只想检查二维姿态和软件同步，"
+            "本次只运行“二维姿态识别”和“多相机同步”。"
+        )
+    return errors
 
 
 def validate_toml_text(text: str) -> tuple[bool, str]:

@@ -6,7 +6,7 @@ from pathlib import Path
 import sys
 import traceback
 
-from .config import STAGES, selected_stages_to_runall_kwargs
+from .config import STAGES, selected_stages_to_runall_kwargs, validate_stage_prerequisites
 
 
 def run_pose2sim(project_dir: Path, stages: list[str]) -> int:
@@ -18,6 +18,12 @@ def run_pose2sim(project_dir: Path, stages: list[str]) -> int:
     kwargs = selected_stages_to_runall_kwargs(stages)
     print(f"Pose2Sim 项目：{project_dir}", flush=True)
     print(f"选中步骤：{', '.join(stages)}", flush=True)
+    prerequisite_errors = validate_stage_prerequisites(project_dir, stages)
+    if prerequisite_errors:
+        print("运行前检查失败：", file=sys.stderr, flush=True)
+        for error in prerequisite_errors:
+            print(error, file=sys.stderr, flush=True)
+        return 1
 
     # Pose2Sim resolves batch/session folders from the current working directory
     # when a path string is provided, so run from the selected project folder.
