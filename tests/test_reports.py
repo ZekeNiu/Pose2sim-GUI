@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
+import re
 import tempfile
 import unittest
 
 from openpyxl import load_workbook
 
-from pose2sim_gui.reports import export_excel, export_html, read_mot, split_motion_columns
+from pose2sim_gui.reports import export_excel, export_html, find_report_video_files, read_mot, split_motion_columns
 
 
 MOT_TEXT = """Coordinates
@@ -42,10 +44,11 @@ class ReportTests(unittest.TestCase):
             self.assertTrue(output.exists())
             workbook = load_workbook(output, read_only=True)
             try:
-                self.assertEqual(set(workbook.sheetnames), {"joint_angles", "translations", "summary"})
-                self.assertEqual(workbook["joint_angles"]["A1"].value, "time")
-                self.assertEqual(workbook["joint_angles"]["B1"].value, "hip_flexion_r")
-                self.assertEqual(workbook["translations"]["B1"].value, "pelvis_tx")
+                self.assertEqual(set(workbook.sheetnames), {"关节活动度", "平移坐标", "统计摘要"})
+                self.assertEqual(workbook["关节活动度"]["A1"].value, "时间（秒）")
+                self.assertEqual(workbook["关节活动度"]["B1"].value, "右髋关节屈伸")
+                self.assertEqual(workbook["平移坐标"]["B1"].value, "pelvis_tx")
+                self.assertEqual(workbook["统计摘要"]["A1"].value, "指标")
             finally:
                 workbook.close()
 
@@ -53,16 +56,38 @@ class ReportTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             mot = tmp_path / "trial.mot"
-            video = tmp_path / "cam01.mp4"
+            video1 = tmp_path / "cam01_pose.mp4"
+            video2 = tmp_path / "cam02_pose.mp4"
             mot.write_text(MOT_TEXT, encoding="utf-8")
-            video.write_bytes(b"")
-            output, warnings = export_html(mot, video)
+            video1.write_bytes(b"")
+            video2.write_bytes(b"")
+            output, warnings = export_html(mot, [video1, video2])
             self.assertEqual(warnings, [])
             html = output.read_text(encoding="utf-8")
             self.assertIn("Plotly.newPlot", html)
-            self.assertIn("<video", html)
+            self.assertEqual(html.count("<video"), 2)
             self.assertIn("plotly_hover", html)
-            self.assertIn("hip_flexion_r", html)
+            self.assertIn("右髋关节屈伸", html)
+            self.assertIn("当前时刻关节活动度", html)
+            payload_match = re.search(r'<script id="motionData" type="application/json">(.*?)</script>', html, re.S)
+            self.assertIsNotNone(payload_match)
+            payload = json.loads(payload_match.group(1))
+            self.assertEqual(payload["translationColumns"], ["pelvis_tx"])
+            self.assertNotIn("pelvis_tx", payload["angleColumns"])
+            self.assertEqual(payload["labels"]["knee_angle_r"], "右膝关节屈伸")
+
+    def test_find_report_video_files_prefers_processed_videos(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            pose = project / "pose"
+            videos = project / "videos"
+            pose.mkdir()
+            videos.mkdir()
+            processed = pose / "cam01_pose.mp4"
+            raw = videos / "cam01.mp4"
+            processed.write_bytes(b"")
+            raw.write_bytes(b"")
+            self.assertEqual(find_report_video_files(project), [processed.resolve()])
 
 
 if __name__ == "__main__":

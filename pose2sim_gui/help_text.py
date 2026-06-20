@@ -21,8 +21,8 @@ HELP_TEXTS: dict[str, str] = {
     ),
     "create_folders": (
         "创建 Pose2Sim 推荐的标准项目文件夹：videos、calibration、reports。"
-        "其中 videos 和 calibration 是 Pose2Sim 输入；reports 是本 GUI 生成 HTML 和 Excel 报告的位置。"
-        "不建议在本软件源码目录中建立 input/output 并让 Pose2Sim 直接读取，因为 Pose2Sim 默认识别的是每个项目内的 videos/ 与 calibration/。"
+        "其中 videos 和 calibration 是 Pose2Sim 输入；reports 仅作为项目内备用记录目录。"
+        "本 GUI 会另外在软件目录下创建 input/ 和 output/；新建项目默认建议放入 input/projects，HTML 和 Excel 报告集中输出到 output/reports。"
     ),
     "import_videos": (
         "把已经录制好的多机位视频复制到当前项目的 videos/ 文件夹。Pose2Sim 支持处理录制好的视频，"
@@ -68,7 +68,7 @@ HELP_TEXTS: dict[str, str] = {
     "right_left_symmetry": "模型缩放时是否假设左右对称。大多数健康被试建议开启；若有假肢、明显畸形或单侧器械，应关闭。",
     "default_height": "自动估计身高失败时使用的默认身高，单位米。建议填真实身高或接近值，避免 OpenSim 模型缩放偏差。",
     "mot_file": "OpenSim 逆运动学输出的 .mot 文件，包含随时间变化的关节角和平移坐标。本 GUI 的 HTML 和 Excel 报告以它为数据源。",
-    "report_video": "用于 HTML 报告同步显示的视频。建议选择与 .mot 对应的相机视频，优先 mp4/webm；其他格式会尝试转码为浏览器兼容 mp4。",
+    "report_video": "HTML 报告会自动使用全部报告视频，不需要逐个选择。优先使用 Pose2Sim 二维姿态阶段生成的 pose/*_pose.mp4；没有处理后视频时才回退到项目 videos/ 中的原始视频。非浏览器兼容格式会尝试转码为 MP4。",
     "stage_calibration": "读取或计算相机内参和外参，输出 calibration/Calib.toml。没有正确校准，三维重建和关节角都不可信。",
     "stage_poseEstimation": "对 videos/ 中每个相机视频运行二维姿态识别，输出逐帧关键点 JSON，并可保存叠加视频。",
     "stage_synchronization": "估计不同相机之间的时间偏移，并生成同步后的二维姿态文件。非硬件同步录制时非常关键。",
@@ -95,10 +95,18 @@ MANUAL_TEXT = """
     cam02.mp4
   calibration/
     Calib.toml 或 intrinsics/、extrinsics/
-  reports/              # 本 GUI 生成的 HTML/Excel 报告
+  reports/              # 项目内备用记录目录
 ```
 
-`input/` 和 `output/` 不是 Pose2Sim 的标准目录。为了和官方流程一致，本 GUI 不要求在软件源码目录下建立 input/output；视频应进入项目的 `videos/`，校准材料进入 `calibration/`，Pose2Sim 会自动生成 `pose/`、`pose-sync/`、`pose-3d/`、`kinematics/`。
+本 GUI 会在软件目录 `D:\\Application\\Biomechanics\\Pose2sim` 下自动创建：
+
+- `input/`：用户素材和新建项目的推荐存放位置。
+- `input/projects/`：用示例配置新建项目时的推荐位置。
+- `input/videos/`：导入视频时的默认选择位置，可作为原始视频暂存区。
+- `input/calibration/`：校准素材暂存区。
+- `output/reports/`：Excel 和 HTML 报告的集中输出位置。
+
+Pose2Sim 本身仍然读取每个项目内的 `videos/` 与 `calibration/`，并在项目中生成 `pose/`、`pose-sync/`、`pose-3d/`、`kinematics/`。这样既符合 Pose2Sim 官方结构，也能让 GUI 结果统一放在软件目录下方便查找。
 
 ## 2. 录制好的视频是否支持
 
@@ -118,7 +126,7 @@ MANUAL_TEXT = """
 3. 点击“导入录制视频”，把多机位视频复制到 `videos/`。
 4. 在“参数”页先使用新手参数；只有明确知道含义时再改高级 TOML。
 5. 在“流程”页按顺序运行：相机校准、二维姿态识别、多相机同步、人物匹配、三维重建、轨迹滤波、虚拟标记点增强、OpenSim 运动学。
-6. 在“报告”页选择 `kinematics/*.mot` 和对应视频，生成 Excel 与 HTML。
+6. 运行流程成功结束后，GUI 会自动从 `kinematics/*.mot` 生成 Excel 与 HTML。也可以在“报告”页手动重新生成。
 
 ## 4. Pose2Sim 会输出什么
 

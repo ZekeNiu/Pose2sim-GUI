@@ -6,7 +6,7 @@ import sys
 from typing import Any
 
 from PySide6.QtCore import QProcess, Qt, QUrl
-from PySide6.QtGui import QAction, QDesktopServices
+from PySide6.QtGui import QAction, QDesktopServices, QFont
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -58,7 +58,8 @@ from .config import (
     validate_toml_text,
 )
 from .help_text import HELP_TEXTS, MANUAL_TEXT, STAGE_LABELS
-from .reports import default_report_dir, export_excel, export_html, find_mot_files, find_video_files
+from .reports import default_report_dir, export_excel, export_html, find_mot_files, find_report_video_files
+from .workspace import APP_ROOT, INPUT_DIR, OUTPUT_DIR, PROJECTS_DIR, RAW_VIDEO_DIR, ensure_app_workspace
 
 
 POSE_MODEL_OPTIONS = [
@@ -152,6 +153,7 @@ class Pose2SimMainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("Pose2Sim 图形界面")
         self.resize(1180, 760)
+        self.workspace = ensure_app_workspace()
         self.project_dir: Path | None = None
         self.config: dict[str, Any] | None = None
         self.process: QProcess | None = None
@@ -272,6 +274,26 @@ class Pose2SimMainWindow(QMainWindow):
         grid.setColumnStretch(0, 1)
         layout.addWidget(group)
 
+        workspace_group = QGroupBox("软件工作目录")
+        workspace_layout = QGridLayout(workspace_group)
+        workspace_text = QLabel(
+            f"软件目录：{APP_ROOT}\n"
+            f"输入暂存：{INPUT_DIR}\n"
+            f"报告输出：{OUTPUT_DIR}\n"
+            "新建项目默认建议放在 input/projects；Excel 和 HTML 报告会自动输出到 output/reports。"
+        )
+        workspace_text.setWordWrap(True)
+        workspace_text.setObjectName("HelpText")
+        open_input_btn = QPushButton(self._icon(QStyle.SP_DirOpenIcon), "打开 input")
+        open_input_btn.clicked.connect(lambda: self.open_folder(INPUT_DIR))
+        open_output_btn = QPushButton(self._icon(QStyle.SP_DirOpenIcon), "打开 output")
+        open_output_btn.clicked.connect(lambda: self.open_folder(OUTPUT_DIR))
+        workspace_layout.addWidget(workspace_text, 0, 0, 2, 1)
+        workspace_layout.addWidget(open_input_btn, 0, 1)
+        workspace_layout.addWidget(open_output_btn, 1, 1)
+        workspace_layout.setColumnStretch(0, 1)
+        layout.addWidget(workspace_group)
+
         self.status_text = QPlainTextEdit()
         self.status_text.setReadOnly(True)
         self.status_text.setPlaceholderText("项目检查结果会显示在这里。")
@@ -279,7 +301,7 @@ class Pose2SimMainWindow(QMainWindow):
 
         note = QLabel(
             "推荐结构：Config.toml、videos/、calibration/。录制好的视频放入 videos/；校准文件或校准素材放入 calibration/；"
-            "Pose2Sim 会自动生成 pose/、pose-sync/、pose-3d/、kinematics/，本 GUI 的报告放入 reports/。"
+            "Pose2Sim 会自动生成 pose/、pose-sync/、pose-3d/、kinematics/；本 GUI 会把报告集中放入软件目录的 output/reports/。"
         )
         note.setWordWrap(True)
         note.setObjectName("HelpText")
@@ -450,6 +472,7 @@ class Pose2SimMainWindow(QMainWindow):
         page = QWidget()
         layout = QVBoxLayout(page)
         self.toml_editor = QTextEdit()
+        self.toml_editor.setObjectName("TomlEditor")
         self.toml_editor.setLineWrapMode(QTextEdit.NoWrap)
         self.toml_editor.setPlaceholderText("请先载入项目，然后在这里编辑完整 Config.toml。")
         layout.addWidget(self.toml_editor, 1)
@@ -510,24 +533,25 @@ class Pose2SimMainWindow(QMainWindow):
         page = QWidget()
         layout = QVBoxLayout(page)
 
-        form_group = QGroupBox("报告输入")
+        form_group = QGroupBox("报告数据（自动生成）")
         form = QFormLayout(form_group)
         self.mot_combo = QComboBox()
         self.mot_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.video_combo = QComboBox()
         self.video_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.video_combo.setToolTip("报告会自动使用列表中的全部视频。优先使用 pose 文件夹下的处理后 *_pose.mp4。")
         self._add_info_row(form, "OpenSim .mot 文件", self.mot_combo, "mot_file")
-        self._add_info_row(form, "同步显示视频", self.video_combo, "report_video")
+        self._add_info_row(form, "报告视频（自动全部使用）", self.video_combo, "report_video")
         layout.addWidget(form_group)
 
         button_row = QHBoxLayout()
         refresh_btn = QPushButton(self._icon(QStyle.SP_BrowserReload), "刷新文件")
         refresh_btn.clicked.connect(self.refresh_report_files)
-        excel_btn = QPushButton(self._icon(QStyle.SP_DialogSaveButton), "生成 Excel")
+        excel_btn = QPushButton(self._icon(QStyle.SP_DialogSaveButton), "重新生成 Excel")
         excel_btn.clicked.connect(self.generate_excel_report)
-        html_btn = QPushButton(self._icon(QStyle.SP_FileDialogContentsView), "生成 HTML")
+        html_btn = QPushButton(self._icon(QStyle.SP_FileDialogContentsView), "重新生成 HTML")
         html_btn.clicked.connect(self.generate_html_report)
-        both_btn = QPushButton(self._icon(QStyle.SP_DialogApplyButton), "全部生成")
+        both_btn = QPushButton(self._icon(QStyle.SP_DialogApplyButton), "全部重新生成")
         both_btn.clicked.connect(self.generate_both_reports)
         button_row.addStretch(1)
         button_row.addWidget(refresh_btn)
@@ -546,6 +570,7 @@ class Pose2SimMainWindow(QMainWindow):
         page = QWidget()
         layout = QVBoxLayout(page)
         viewer = QTextEdit()
+        viewer.setObjectName("ManualViewer")
         viewer.setReadOnly(True)
         viewer.setMarkdown(MANUAL_TEXT)
         layout.addWidget(viewer, 1)
@@ -555,43 +580,141 @@ class Pose2SimMainWindow(QMainWindow):
         self.setStyleSheet(
             """
             QMainWindow, QWidget {
-                background: #f6f7f9;
-                color: #1f2933;
+                background: #f4f7fb;
+                color: #172033;
+                font-family: "Microsoft YaHei UI", "Microsoft YaHei", "Segoe UI", Arial, sans-serif;
                 font-size: 13px;
             }
-            QTabWidget::pane, QGroupBox, QPlainTextEdit, QTextEdit, QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox {
-                border: 1px solid #cfd6df;
-                border-radius: 6px;
+            QLabel {
+                background: transparent;
+                color: #172033;
+            }
+            QMenuBar {
                 background: #ffffff;
+                border-bottom: 1px solid #d8e0ea;
+            }
+            QMenuBar::item:selected, QMenu::item:selected {
+                background: #e8f1ff;
+                color: #174ea6;
+            }
+            QTabWidget::pane {
+                border: 1px solid #d8e0ea;
+                border-radius: 8px;
+                background: #ffffff;
+                top: -1px;
+            }
+            QTabBar::tab {
+                background: #eaf0f7;
+                border: 1px solid #d8e0ea;
+                border-bottom: none;
+                border-top-left-radius: 7px;
+                border-top-right-radius: 7px;
+                padding: 8px 14px;
+                margin-right: 3px;
+                color: #475569;
+            }
+            QTabBar::tab:selected {
+                background: #ffffff;
+                color: #0f3d75;
+                font-weight: 600;
             }
             QGroupBox {
-                margin-top: 12px;
-                padding: 12px;
+                border: 1px solid #d8e0ea;
+                border-radius: 8px;
+                background: #ffffff;
+                margin-top: 18px;
+                padding: 18px 12px 12px;
                 font-weight: 600;
             }
             QGroupBox::title {
                 subcontrol-origin: margin;
-                left: 10px;
-                padding: 0 4px;
+                subcontrol-position: top left;
+                left: 12px;
+                top: 7px;
+                padding: 0 6px;
+                background: #ffffff;
+                color: #1e293b;
+            }
+            QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox {
+                min-height: 30px;
+                border: 1px solid #c8d2df;
+                border-radius: 6px;
+                background: #ffffff;
+                padding: 4px 7px;
+                selection-background-color: #1f6feb;
+            }
+            QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus,
+            QPlainTextEdit:focus, QTextEdit:focus {
+                border: 1px solid #1f6feb;
             }
             QPushButton {
-                border: 1px solid #aab4c2;
+                border: 1px solid #b7c4d3;
                 border-radius: 6px;
                 background: #ffffff;
                 padding: 7px 10px;
+                color: #172033;
+                min-height: 28px;
             }
-            QPushButton:hover { background: #eef4ff; }
-            QPushButton:disabled { color: #8a95a3; background: #eef0f3; }
+            QPushButton:hover {
+                border-color: #1f6feb;
+                background: #e8f1ff;
+                color: #0f3d75;
+            }
+            QPushButton:pressed {
+                background: #d8e8ff;
+            }
+            QPushButton:disabled, QWidget:disabled {
+                color: #8b97a8;
+                background: #edf1f6;
+            }
+            QCheckBox {
+                spacing: 8px;
+                background: transparent;
+            }
             QPlainTextEdit, QTextEdit {
+                border: 1px solid #d8e0ea;
+                border-radius: 8px;
+                background: #ffffff;
+                color: #172033;
                 padding: 8px;
+            }
+            QPlainTextEdit, #TomlEditor {
                 font-family: Consolas, "Courier New", monospace;
+                font-size: 12px;
+            }
+            #ManualViewer {
+                font-family: "Microsoft YaHei UI", "Microsoft YaHei", "Segoe UI", Arial, sans-serif;
+                font-size: 13px;
+            }
+            QScrollArea {
+                border: none;
+                background: transparent;
+            }
+            QScrollBar:vertical, QScrollBar:horizontal {
+                background: #edf2f7;
+                border: none;
+                margin: 0;
+            }
+            QScrollBar::handle:vertical, QScrollBar::handle:horizontal {
+                background: #b8c5d6;
+                border-radius: 4px;
+                min-height: 24px;
+                min-width: 24px;
             }
             #AppTitle {
-                font-size: 22px;
+                font-size: 23px;
                 font-weight: 700;
+                color: #10223f;
             }
             #ProjectLabel, #HelpText {
-                color: #52606d;
+                color: #5b677a;
+            }
+            QToolTip {
+                background: #172033;
+                color: #ffffff;
+                border: 1px solid #172033;
+                padding: 6px;
+                border-radius: 4px;
             }
             """
         )
@@ -604,13 +727,18 @@ class Pose2SimMainWindow(QMainWindow):
         ):
             widget.setEnabled(enabled)
 
+    def open_folder(self, folder: Path) -> None:
+        folder.mkdir(parents=True, exist_ok=True)
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder)))
+
     def choose_project(self) -> None:
-        folder = QFileDialog.getExistingDirectory(self, "选择 Pose2Sim 项目文件夹")
+        start_dir = str(self.project_dir or PROJECTS_DIR)
+        folder = QFileDialog.getExistingDirectory(self, "选择 Pose2Sim 项目文件夹", start_dir)
         if folder:
             self.load_project(Path(folder))
 
     def create_project_from_demo(self) -> None:
-        folder = QFileDialog.getExistingDirectory(self, "选择新 Pose2Sim 项目文件夹")
+        folder = QFileDialog.getExistingDirectory(self, "选择新 Pose2Sim 项目文件夹", str(PROJECTS_DIR))
         if not folder:
             return
         try:
@@ -646,7 +774,7 @@ class Pose2SimMainWindow(QMainWindow):
         files, _ = QFileDialog.getOpenFileNames(
             self,
             "选择要导入的录制视频",
-            str(project_dir),
+            str(RAW_VIDEO_DIR if RAW_VIDEO_DIR.exists() else project_dir),
             "视频文件 (*.mp4 *.m4v *.mov *.avi *.mkv *.webm *.ogg *.ogv);;所有文件 (*.*)",
         )
         if not files:
@@ -875,6 +1003,8 @@ class Pose2SimMainWindow(QMainWindow):
         self.run_btn.setEnabled(True)
         self.stop_btn.setEnabled(False)
         self.pipeline_log.appendPlainText(f"\n流程结束，退出码：{exit_code}。")
+        if exit_code == 0:
+            self.generate_auto_reports()
         self.refresh_report_files()
         self.process = None
 
@@ -886,24 +1016,59 @@ class Pose2SimMainWindow(QMainWindow):
     def refresh_report_files(self) -> None:
         self.mot_combo.clear()
         self.video_combo.clear()
-        self.video_combo.addItem("不使用视频", None)
         if not self.project_dir:
             return
-        for mot in find_mot_files(self.project_dir):
+        mot_files = find_mot_files(self.project_dir)
+        report_videos = find_report_video_files(self.project_dir)
+        for mot in mot_files:
             self.mot_combo.addItem(str(mot.relative_to(self.project_dir)), str(mot))
-        for video in find_video_files(self.project_dir):
-            self.video_combo.addItem(str(video.relative_to(self.project_dir)), str(video))
+        self.video_combo.addItem(f"自动使用全部报告视频：{len(report_videos)} 个", None)
+        for video in report_videos:
+            try:
+                label = str(video.relative_to(self.project_dir))
+            except ValueError:
+                label = str(video)
+            self.video_combo.addItem(label, str(video))
         self.report_log.appendPlainText(
-            f"找到 {self.mot_combo.count()} 个 .mot 文件和 {max(0, self.video_combo.count() - 1)} 个视频文件。"
+            f"找到 {len(mot_files)} 个 .mot 文件和 {len(report_videos)} 个报告视频。报告视频优先使用 pose/*_pose.mp4。"
         )
 
     def _selected_mot(self) -> Path | None:
         data = self.mot_combo.currentData()
         return Path(data) if data else None
 
-    def _selected_video(self) -> Path | None:
-        data = self.video_combo.currentData()
-        return Path(data) if data else None
+    def _report_videos(self) -> list[Path]:
+        if not self.project_dir:
+            return []
+        return find_report_video_files(self.project_dir)
+
+    def _log_report_message(self, message: str) -> None:
+        if hasattr(self, "report_log"):
+            self.report_log.appendPlainText(message)
+        if hasattr(self, "pipeline_log"):
+            self.pipeline_log.appendPlainText(message)
+
+    def generate_auto_reports(self) -> list[Path]:
+        if not self.project_dir:
+            return []
+        mots = find_mot_files(self.project_dir)
+        if not mots:
+            self._log_report_message("\n未找到 kinematics/*.mot，自动报告已跳过。请运行 OpenSim 运动学阶段后再生成报告。")
+            return []
+        report_dir = default_report_dir(self.project_dir)
+        videos = self._report_videos()
+        outputs: list[Path] = []
+        self._log_report_message(f"\n正在自动生成报告，输出目录：{report_dir}")
+        for mot in mots:
+            excel_path = export_excel(mot, report_dir / f"{mot.stem}_关节活动度.xlsx")
+            html_path, warnings = export_html(mot, videos, report_dir / f"{mot.stem}_关节活动度.html")
+            outputs.extend([excel_path, html_path])
+            self._log_report_message(f"  Excel：{excel_path}")
+            self._log_report_message(f"  HTML：{html_path}")
+            for warning in warnings:
+                self._log_report_message(f"  提示：{warning}")
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(report_dir)))
+        return outputs
 
     def generate_excel_report(self) -> Path | None:
         mot = self._selected_mot()
@@ -912,7 +1077,7 @@ class Pose2SimMainWindow(QMainWindow):
             return None
         try:
             report_dir = default_report_dir(self.project_dir or mot.parent)
-            output = export_excel(mot, report_dir / f"{mot.stem}_joint_angles.xlsx")
+            output = export_excel(mot, report_dir / f"{mot.stem}_关节活动度.xlsx")
             self.report_log.appendPlainText(f"Excel 报告：{output}")
             QDesktopServices.openUrl(QUrl.fromLocalFile(str(output.parent)))
             return output
@@ -927,7 +1092,7 @@ class Pose2SimMainWindow(QMainWindow):
             return None
         try:
             report_dir = default_report_dir(self.project_dir or mot.parent)
-            output, warnings = export_html(mot, self._selected_video(), report_dir / f"{mot.stem}_joint_angles.html")
+            output, warnings = export_html(mot, self._report_videos(), report_dir / f"{mot.stem}_关节活动度.html")
             self.report_log.appendPlainText(f"HTML 报告：{output}")
             for warning in warnings:
                 self.report_log.appendPlainText(f"提示：{warning}")
@@ -952,6 +1117,8 @@ def create_app(argv: list[str] | None = None) -> QApplication:
     app = QApplication.instance()
     if app is None:
         app = QApplication(argv or sys.argv)
+    app.setStyle("Fusion")
+    app.setFont(QFont("Microsoft YaHei UI", 10))
     app.setApplicationName("Pose2Sim 图形界面")
     app.setApplicationVersion(__version__)
     return app
