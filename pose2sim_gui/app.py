@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 import shutil
 import sys
-from typing import Any
+from typing import Any, Iterable
 
 from PySide6.QtCore import QProcess, Qt, QUrl
 from PySide6.QtGui import QAction, QDesktopServices, QFont
@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QGridLayout,
     QGroupBox,
+    QHeaderView,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -28,6 +29,8 @@ from PySide6.QtWidgets import (
     QSpinBox,
     QStyle,
     QTabWidget,
+    QTableWidget,
+    QTableWidgetItem,
     QTextEdit,
     QVBoxLayout,
     QWidget,
@@ -43,8 +46,10 @@ from .config import (
     STAGES,
     TRACKING_MODES,
     apply_beginner_safety,
+    camera_names_from_videos,
     demo_config_path,
     display_toml_value,
+    ensure_calibration_folders,
     ensure_project_config,
     ensure_standard_project_folders,
     get_nested,
@@ -52,13 +57,17 @@ from .config import (
     load_config_text,
     parse_toml_value,
     project_status,
+    project_workflow_status,
+    read_scene_points_csv,
     save_config,
     save_config_text,
     set_nested,
     validate_toml_text,
     validate_stage_prerequisites,
+    write_scene_points_csv,
 )
-from .help_text import HELP_TEXTS, MANUAL_TEXT, STAGE_LABELS
+from .help_text import HELP_TEXTS, STAGE_LABELS
+from .manual_zh import MANUAL_TEXT
 from .reports import default_report_dir, export_excel, export_html, find_mot_files, find_report_video_files
 from .workspace import (
     APP_ROOT,
@@ -157,6 +166,18 @@ FILTER_TYPE_OPTIONS = [
     ("速度 Butterworth（butterworth_on_speed）", "butterworth_on_speed"),
 ]
 
+TWO_D_SYNC_STAGES = ("poseEstimation", "synchronization")
+CALIBRATION_STAGES = ("calibration",)
+FULL_3D_REPORT_STAGES = (
+    "poseEstimation",
+    "synchronization",
+    "personAssociation",
+    "triangulation",
+    "filtering",
+    "markerAugmentation",
+    "kinematics",
+)
+
 
 class Pose2SimMainWindow(QMainWindow):
     def __init__(self) -> None:
@@ -229,15 +250,184 @@ class Pose2SimMainWindow(QMainWindow):
         layout.addLayout(title_row)
 
         self.tabs = QTabWidget()
+        self.tabs.addTab(self._build_wizard_tab(), "向导")
         self.tabs.addTab(self._build_project_tab(), "项目")
         self.tabs.addTab(self._build_parameters_tab(), "参数")
-        self.tabs.addTab(self._build_pipeline_tab(), "流程")
+        self.tabs.addTab(self._build_pipeline_tab(), "流程/高级")
         self.tabs.addTab(self._build_reports_tab(), "报告")
         self.tabs.addTab(self._build_help_tab(), "使用说明")
         layout.addWidget(self.tabs, 1)
 
         self.setCentralWidget(root)
         self._set_project_dependent_enabled(False)
+        self.refresh_workflow_status()
+
+    def _build_wizard_tab(self) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setSpacing(12)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        content = QWidget()
+        content_layout = QVBoxLayout(content)
+        content_layout.setSpacing(12)
+
+        dashboard_group = QGroupBox("项目状态仪表盘")
+        dashboard_layout = QGridLayout(dashboard_group)
+        self.dashboard_labels: dict[str, QLabel] = {}
+        dashboard_items = [
+            ("project", "项目"),
+            ("videos", "正式动作视频"),
+            ("calibration_material", "校准素材"),
+            ("calibration_toml", "标定文件"),
+            ("pose_sync", "2D/同步结果"),
+            ("three_d", "3D 结果"),
+            ("reports", "报告数据"),
+            ("next_step", "推荐下一步"),
+        ]
+        for index, (key, label_text) in enumerate(dashboard_items):
+            title = QLabel(label_text)
+            title.setObjectName("DashboardTitle")
+            value = QLabel("未载入")
+            value.setObjectName("DashboardValue")
+            value.setWordWrap(True)
+            self.dashboard_labels[key] = value
+            row = index // 2
+            col = (index % 2) * 2
+            dashboard_layout.addWidget(title, row, col)
+            dashboard_layout.addWidget(value, row, col + 1)
+        dashboard_layout.setColumnStretch(1, 1)
+        dashboard_layout.setColumnStretch(3, 1)
+        content_layout.addWidget(dashboard_group)
+
+        quick_group = QGroupBox("推荐操作")
+        quick_layout = QGridLayout(quick_group)
+        choose_project_btn = QPushButton(self._icon(QStyle.SP_DirOpenIcon), "选择/新建项目")
+        choose_project_btn.clicked.connect(self.choose_project)
+        import_videos_btn = QPushButton(self._icon(QStyle.SP_DialogOpenButton), "导入正式动作视频")
+        import_videos_btn.clicked.connect(self.import_recorded_videos)
+        self.create_calibration_folders_btn = QPushButton(self._icon(QStyle.SP_FileDialogNewFolder), "创建校准文件夹")
+        self.create_calibration_folders_btn.clicked.connect(self.create_calibration_folders_from_videos)
+        open_calib_btn = QPushButton(self._icon(QStyle.SP_DirOpenIcon), "打开 calibration")
+        open_calib_btn.clicked.connect(self.open_calibration_folder)
+        refresh_status_btn = QPushButton(self._icon(QStyle.SP_BrowserReload), "刷新状态")
+        refresh_status_btn.clicked.connect(self.refresh_workflow_status)
+        quick_layout.addWidget(choose_project_btn, 0, 0)
+        quick_layout.addWidget(import_videos_btn, 0, 1)
+        quick_layout.addWidget(self.create_calibration_folders_btn, 0, 2)
+        quick_layout.addWidget(open_calib_btn, 0, 3)
+        quick_layout.addWidget(refresh_status_btn, 0, 4)
+        quick_layout.setColumnStretch(4, 1)
+        content_layout.addWidget(quick_group)
+
+        capture_group = QGroupBox("采集说明（普通手机/Redmi 推荐流程）")
+        capture_layout = QVBoxLayout(capture_group)
+        capture_text = QLabel(
+            "1. 固定两台手机的位置、分辨率、帧率和横竖屏；锁定焦距/曝光，正式动作前后不要移动手机。\n"
+            "2. 每台手机先单独拍内参素材：棋盘格或 Charuco 板覆盖画面不同位置和角度。\n"
+            "3. 手机固定后拍外参素材：推荐 scene 方法，在场地布置 10 个以上分散且可测量的 3D 点，校准时按提示点击这些点。\n"
+            "4. 不移动手机，录正式动作视频；没有硬件同步时，在动作开始加入明显同步事件，例如跳一下、快速抬手、拍手或闪光。\n"
+            "5. 相机一旦移动，外参必须重做；分辨率、焦距或镜头明显变化时，内参也应重做。"
+        )
+        capture_text.setWordWrap(True)
+        capture_text.setObjectName("HelpText")
+        capture_layout.addWidget(capture_text)
+        content_layout.addWidget(capture_group)
+
+        calibration_group = QGroupBox("校准向导")
+        calibration_layout = QVBoxLayout(calibration_group)
+        route_form = QFormLayout()
+        self.calibration_route = self._combo(
+            [
+                ("已有标定文件：把 Calib.toml 放入 calibration/ 后跳过校准", "existing"),
+                ("从素材计算标定：棋盘格内参 + 场景点/棋盘格外参（推荐）", "calculate"),
+                ("仅做 2D/同步检查：不进行 3D/OpenSim", "two_d_only"),
+            ]
+        )
+        self.wizard_calibration_type = self._combo(CALIBRATION_TYPE_OPTIONS)
+        self.wizard_convert_from = self._combo(CONVERT_FROM_OPTIONS)
+        self.wizard_intrinsics_extension = QLineEdit("mp4")
+        self.wizard_extrinsics_extension = QLineEdit("mp4")
+        self.wizard_intrinsics_corners = QLineEdit("8, 5")
+        self.wizard_intrinsics_square = QDoubleSpinBox()
+        self.wizard_intrinsics_square.setRange(1.0, 500.0)
+        self.wizard_intrinsics_square.setDecimals(1)
+        self.wizard_intrinsics_square.setSingleStep(1.0)
+        self.wizard_intrinsics_square.setSuffix(" mm")
+        self.wizard_intrinsics_square.setValue(25.0)
+        self.wizard_extrinsics_method = self._combo(EXTRINSICS_OPTIONS)
+        route_form.addRow("校准路径", self._with_info(self.calibration_route, "wizard_calibration_route"))
+        route_form.addRow("Pose2Sim 校准方式", self._with_info(self.wizard_calibration_type, "calibration_type"))
+        route_form.addRow("已有标定来源", self._with_info(self.wizard_convert_from, "convert_from"))
+        route_form.addRow("内参素材扩展名", self._with_info(self.wizard_intrinsics_extension, "intrinsics_extension"))
+        route_form.addRow("外参素材扩展名", self._with_info(self.wizard_extrinsics_extension, "wizard_extrinsics_extension"))
+        route_form.addRow("棋盘格内角点数", self._with_info(self.wizard_intrinsics_corners, "wizard_intrinsics_corners"))
+        route_form.addRow("棋盘格方格边长", self._with_info(self.wizard_intrinsics_square, "wizard_intrinsics_square"))
+        route_form.addRow("外参方法", self._with_info(self.wizard_extrinsics_method, "extrinsics_method"))
+        calibration_layout.addLayout(route_form)
+
+        scene_header = QHBoxLayout()
+        scene_label = QLabel("scene 外参 3D 场景点（单位建议用米，X/Y/Z 必须与实际测量坐标一致）")
+        scene_label.setWordWrap(True)
+        scene_label.setObjectName("HelpText")
+        scene_header.addWidget(scene_label, 1)
+        add_point_btn = QPushButton("添加点")
+        add_point_btn.clicked.connect(self.add_scene_point_row)
+        remove_point_btn = QPushButton("删除选中点")
+        remove_point_btn.clicked.connect(self.remove_selected_scene_point_rows)
+        import_points_btn = QPushButton("导入 CSV")
+        import_points_btn.clicked.connect(self.import_scene_points_csv)
+        export_points_btn = QPushButton("导出 CSV")
+        export_points_btn.clicked.connect(self.export_scene_points_csv)
+        scene_header.addWidget(add_point_btn)
+        scene_header.addWidget(remove_point_btn)
+        scene_header.addWidget(import_points_btn)
+        scene_header.addWidget(export_points_btn)
+        calibration_layout.addLayout(scene_header)
+
+        self.scene_points_table = QTableWidget(10, 4)
+        self.scene_points_table.setHorizontalHeaderLabels(["点名", "X", "Y", "Z"])
+        self.scene_points_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        for row in range(10):
+            self.scene_points_table.setItem(row, 0, QTableWidgetItem(f"P{row + 1:02d}"))
+            for col in range(1, 4):
+                self.scene_points_table.setItem(row, col, QTableWidgetItem(""))
+        calibration_layout.addWidget(self.scene_points_table)
+
+        calibration_button_row = QHBoxLayout()
+        save_calibration_btn = QPushButton(self._icon(QStyle.SP_DialogSaveButton), "保存校准设置到 Config.toml")
+        save_calibration_btn.clicked.connect(self.save_calibration_wizard_settings)
+        calibration_button_row.addStretch(1)
+        calibration_button_row.addWidget(save_calibration_btn)
+        calibration_layout.addLayout(calibration_button_row)
+        content_layout.addWidget(calibration_group)
+
+        run_group = QGroupBox("运行")
+        run_layout = QVBoxLayout(run_group)
+        self.workflow_warning = QLabel("载入项目后会显示当前能运行的步骤。")
+        self.workflow_warning.setObjectName("WarningText")
+        self.workflow_warning.setWordWrap(True)
+        run_layout.addWidget(self.workflow_warning)
+        run_button_row = QHBoxLayout()
+        self.run_2d_sync_btn = QPushButton(self._icon(QStyle.SP_MediaPlay), "只检查 2D/同步")
+        self.run_2d_sync_btn.clicked.connect(lambda: self.run_stage_preset(TWO_D_SYNC_STAGES))
+        self.run_calibration_btn = QPushButton(self._icon(QStyle.SP_MediaPlay), "运行校准")
+        self.run_calibration_btn.clicked.connect(lambda: self.run_stage_preset(CALIBRATION_STAGES))
+        self.run_full_3d_btn = QPushButton(self._icon(QStyle.SP_MediaPlay), "运行完整 3D + 报告")
+        self.run_full_3d_btn.setObjectName("PrimaryButton")
+        self.run_full_3d_btn.clicked.connect(lambda: self.run_stage_preset(FULL_3D_REPORT_STAGES))
+        run_button_row.addWidget(self.run_2d_sync_btn)
+        run_button_row.addWidget(self.run_calibration_btn)
+        run_button_row.addWidget(self.run_full_3d_btn)
+        run_button_row.addStretch(1)
+        run_layout.addLayout(run_button_row)
+        content_layout.addWidget(run_group)
+
+        content_layout.addStretch(1)
+        scroll.setWidget(content)
+        layout.addWidget(scroll, 1)
+        return page
 
     def _build_project_tab(self) -> QWidget:
         page = QWidget()
@@ -509,8 +699,37 @@ class Pose2SimMainWindow(QMainWindow):
     def _build_pipeline_tab(self) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
-        stage_group = QGroupBox("Pose2Sim 处理流程")
-        stage_layout = QGridLayout(stage_group)
+
+        recommended_group = QGroupBox("推荐运行入口")
+        recommended_layout = QVBoxLayout(recommended_group)
+        self.pipeline_prereq_label = QLabel("载入项目后会根据视频、校准和结果状态启用对应按钮。")
+        self.pipeline_prereq_label.setObjectName("WarningText")
+        self.pipeline_prereq_label.setWordWrap(True)
+        recommended_layout.addWidget(self.pipeline_prereq_label)
+        preset_row = QHBoxLayout()
+        self.pipeline_2d_sync_btn = QPushButton(self._icon(QStyle.SP_MediaPlay), "只检查 2D/同步")
+        self.pipeline_2d_sync_btn.clicked.connect(lambda: self.run_stage_preset(TWO_D_SYNC_STAGES))
+        self.pipeline_calibration_btn = QPushButton(self._icon(QStyle.SP_MediaPlay), "运行校准")
+        self.pipeline_calibration_btn.clicked.connect(lambda: self.run_stage_preset(CALIBRATION_STAGES))
+        self.pipeline_full_3d_btn = QPushButton(self._icon(QStyle.SP_MediaPlay), "运行完整 3D + 报告")
+        self.pipeline_full_3d_btn.clicked.connect(lambda: self.run_stage_preset(FULL_3D_REPORT_STAGES))
+        preset_row.addWidget(self.pipeline_2d_sync_btn)
+        preset_row.addWidget(self.pipeline_calibration_btn)
+        preset_row.addWidget(self.pipeline_full_3d_btn)
+        preset_row.addStretch(1)
+        recommended_layout.addLayout(preset_row)
+        layout.addWidget(recommended_group)
+
+        stage_group = QGroupBox("高级手动步骤（有风险）")
+        stage_container = QVBoxLayout(stage_group)
+        advanced_note = QLabel(
+            "高级模式允许手动勾选 Pose2Sim 阶段，适合调试和复用中间结果。"
+            "如果没有 calibration/*.toml，请不要运行人物匹配、三维重建、滤波、增强或运动学。"
+        )
+        advanced_note.setObjectName("DangerText")
+        advanced_note.setWordWrap(True)
+        stage_container.addWidget(advanced_note)
+        stage_layout = QGridLayout()
         self.stage_checks: dict[str, QCheckBox] = {}
         for index, stage in enumerate(STAGES):
             check = QCheckBox(STAGE_LABELS.get(stage, stage))
@@ -522,10 +741,11 @@ class Pose2SimMainWindow(QMainWindow):
             stage_widget_layout.addWidget(check, 1)
             stage_widget_layout.addWidget(self._info_button(f"stage_{stage}", STAGE_LABELS.get(stage, stage)))
             stage_layout.addWidget(stage_widget, index // 4, index % 4)
+        stage_container.addLayout(stage_layout)
         layout.addWidget(stage_group)
 
         button_row = QHBoxLayout()
-        self.run_btn = QPushButton(self._icon(QStyle.SP_MediaPlay), "运行选中步骤")
+        self.run_btn = QPushButton(self._icon(QStyle.SP_MediaPlay), "高级：运行勾选步骤")
         self.run_btn.clicked.connect(self.run_pipeline)
         self.stop_btn = QPushButton(self._icon(QStyle.SP_MediaStop), "停止")
         self.stop_btn.clicked.connect(self.stop_pipeline)
@@ -690,6 +910,22 @@ class Pose2SimMainWindow(QMainWindow):
                 color: #172033;
                 padding: 8px;
             }
+            QTableWidget {
+                border: 1px solid #d8e0ea;
+                border-radius: 8px;
+                background: #ffffff;
+                gridline-color: #e2e8f0;
+                selection-background-color: #dbeafe;
+            }
+            QHeaderView::section {
+                background: #eef3f8;
+                color: #1e293b;
+                border: none;
+                border-right: 1px solid #d8e0ea;
+                border-bottom: 1px solid #d8e0ea;
+                padding: 6px;
+                font-weight: 600;
+            }
             QPlainTextEdit, #TomlEditor {
                 font-family: Consolas, "Courier New", monospace;
                 font-size: 12px;
@@ -721,6 +957,39 @@ class Pose2SimMainWindow(QMainWindow):
             #ProjectLabel, #HelpText {
                 color: #5b677a;
             }
+            #DashboardTitle {
+                color: #475569;
+                font-weight: 600;
+            }
+            #DashboardValue {
+                min-height: 32px;
+            }
+            #WarningText {
+                color: #8a4b00;
+                background: #fff7e6;
+                border: 1px solid #f2d091;
+                border-radius: 6px;
+                padding: 8px;
+            }
+            #DangerText {
+                color: #9a1b1b;
+                background: #fdecec;
+                border: 1px solid #f3b5b5;
+                border-radius: 6px;
+                padding: 8px;
+                font-weight: 500;
+            }
+            QPushButton#PrimaryButton {
+                background: #1f6feb;
+                border-color: #1f6feb;
+                color: #ffffff;
+                font-weight: 600;
+            }
+            QPushButton#PrimaryButton:hover {
+                background: #1557bf;
+                border-color: #1557bf;
+                color: #ffffff;
+            }
             QToolTip {
                 background: #172033;
                 color: #ffffff;
@@ -733,11 +1002,13 @@ class Pose2SimMainWindow(QMainWindow):
 
     def _set_project_dependent_enabled(self, enabled: bool) -> None:
         for widget in (
-            self.tabs.widget(1),
             self.tabs.widget(2),
             self.tabs.widget(3),
+            self.tabs.widget(4),
         ):
             widget.setEnabled(enabled)
+        if hasattr(self, "create_calibration_folders_btn"):
+            self.create_calibration_folders_btn.setEnabled(enabled)
 
     def open_folder(self, folder: Path) -> None:
         folder.mkdir(parents=True, exist_ok=True)
@@ -773,8 +1044,108 @@ class Pose2SimMainWindow(QMainWindow):
                 self.status_text.appendPlainText(f"  {folder}")
             if self.project_dir:
                 self.refresh_report_files()
+            self.refresh_workflow_status()
         except Exception as exc:
             self._error("无法创建标准文件夹", exc)
+
+    def create_calibration_folders_from_videos(self) -> None:
+        if not self.project_dir:
+            self._message("尚未载入项目", "请先选择或新建一个项目。")
+            return
+        try:
+            camera_names = camera_names_from_videos(self.project_dir)
+            folders = ensure_calibration_folders(self.project_dir, camera_names)
+            self.status_text.appendPlainText("已创建/确认校准文件夹：")
+            for folder in folders:
+                self.status_text.appendPlainText(f"  {folder}")
+            self.refresh_workflow_status()
+            self.open_folder(self.project_dir / "calibration")
+        except Exception as exc:
+            self._error("无法创建校准文件夹", exc)
+
+    def open_calibration_folder(self) -> None:
+        if not self.project_dir:
+            self._message("尚未载入项目", "请先选择或新建一个项目。")
+            return
+        ensure_standard_project_folders(self.project_dir)
+        self.open_folder(self.project_dir / "calibration")
+
+    def add_scene_point_row(self) -> None:
+        row = self.scene_points_table.rowCount()
+        self.scene_points_table.insertRow(row)
+        self.scene_points_table.setItem(row, 0, QTableWidgetItem(f"P{row + 1:02d}"))
+        for col in range(1, 4):
+            self.scene_points_table.setItem(row, col, QTableWidgetItem(""))
+
+    def remove_selected_scene_point_rows(self) -> None:
+        selected_rows = sorted({index.row() for index in self.scene_points_table.selectedIndexes()}, reverse=True)
+        for row in selected_rows:
+            self.scene_points_table.removeRow(row)
+
+    def _scene_points_from_table(self) -> list[dict[str, float | str]]:
+        rows: list[dict[str, float | str]] = []
+        for row in range(self.scene_points_table.rowCount()):
+            values: list[str] = []
+            for col in range(4):
+                item = self.scene_points_table.item(row, col)
+                values.append(item.text().strip() if item else "")
+            if not any(values):
+                continue
+            if values[0] and not any(values[1:]):
+                continue
+            if not all(values):
+                raise ValueError(f"第 {row + 1} 行场景点不完整，请填写点名、X、Y、Z。")
+            rows.append(
+                {
+                    "name": values[0],
+                    "x": float(values[1]),
+                    "y": float(values[2]),
+                    "z": float(values[3]),
+                }
+            )
+        return rows
+
+    def _load_scene_points_table(self, rows: list[dict[str, float | str]]) -> None:
+        self.scene_points_table.setRowCount(max(len(rows), 1))
+        for row, data in enumerate(rows):
+            self.scene_points_table.setItem(row, 0, QTableWidgetItem(str(data.get("name", ""))))
+            self.scene_points_table.setItem(row, 1, QTableWidgetItem(str(data.get("x", ""))))
+            self.scene_points_table.setItem(row, 2, QTableWidgetItem(str(data.get("y", ""))))
+            self.scene_points_table.setItem(row, 3, QTableWidgetItem(str(data.get("z", ""))))
+
+    def import_scene_points_csv(self) -> None:
+        start_dir = str(self.project_dir or APP_ROOT)
+        file_name, _ = QFileDialog.getOpenFileName(
+            self,
+            "导入场景点 CSV",
+            start_dir,
+            "CSV 文件 (*.csv);;所有文件 (*.*)",
+        )
+        if not file_name:
+            return
+        try:
+            rows = read_scene_points_csv(Path(file_name))
+            self._load_scene_points_table(rows)
+            self._message("导入完成", f"已导入 {len(rows)} 个场景点。")
+        except Exception as exc:
+            self._error("无法导入场景点 CSV", exc)
+
+    def export_scene_points_csv(self) -> None:
+        start_dir = str((self.project_dir / "calibration") if self.project_dir else APP_ROOT)
+        file_name, _ = QFileDialog.getSaveFileName(
+            self,
+            "导出场景点 CSV",
+            str(Path(start_dir) / "scene_points.csv"),
+            "CSV 文件 (*.csv);;所有文件 (*.*)",
+        )
+        if not file_name:
+            return
+        try:
+            rows = self._scene_points_from_table()
+            write_scene_points_csv(Path(file_name), rows)
+            self._message("导出完成", f"已导出 {len(rows)} 个场景点。")
+        except Exception as exc:
+            self._error("无法导出场景点 CSV", exc)
 
     def import_recorded_videos(self) -> None:
         project_text = self.project_edit.text().strip()
@@ -805,6 +1176,7 @@ class Pose2SimMainWindow(QMainWindow):
                 self.status_text.appendPlainText(f"  {item.name}")
             if self.project_dir:
                 self.refresh_report_files()
+            self.refresh_workflow_status()
         except Exception as exc:
             self._error("无法导入视频", exc)
 
@@ -844,9 +1216,122 @@ class Pose2SimMainWindow(QMainWindow):
         project_text = self.project_edit.text().strip()
         if not project_text:
             self.status_text.setPlainText("请先选择项目文件夹。")
+            self.refresh_workflow_status()
             return
         status = project_status(Path(project_text))
         self.status_text.setPlainText("\n".join(status.summary_lines()))
+        self.refresh_workflow_status()
+
+    def _set_dashboard_value(self, key: str, text: str, state: str = "neutral") -> None:
+        label = self.dashboard_labels.get(key)
+        if label is None:
+            return
+        label.setText(text)
+        styles = {
+            "good": "background:#e9f7ef;color:#17633a;border:1px solid #b7e2c7;border-radius:6px;padding:6px;",
+            "warn": "background:#fff7e6;color:#8a4b00;border:1px solid #f2d091;border-radius:6px;padding:6px;",
+            "bad": "background:#fdecec;color:#9a1b1b;border:1px solid #f3b5b5;border-radius:6px;padding:6px;",
+            "neutral": "background:#f5f7fb;color:#334155;border:1px solid #d8e0ea;border-radius:6px;padding:6px;",
+        }
+        label.setStyleSheet(styles.get(state, styles["neutral"]))
+
+    def _set_run_button_states(self, status_can_run: dict[str, bool]) -> None:
+        pairs = [
+            ("2d", ("run_2d_sync_btn", "pipeline_2d_sync_btn")),
+            ("calibration", ("run_calibration_btn", "pipeline_calibration_btn")),
+            ("full", ("run_full_3d_btn", "pipeline_full_3d_btn")),
+        ]
+        running = self.process is not None
+        for key, names in pairs:
+            enabled = status_can_run.get(key, False) and not running
+            for name in names:
+                if hasattr(self, name):
+                    getattr(self, name).setEnabled(enabled)
+        if hasattr(self, "run_btn"):
+            self.run_btn.setEnabled(bool(self.project_dir) and not running)
+        if hasattr(self, "stop_btn"):
+            self.stop_btn.setEnabled(running)
+
+    def refresh_workflow_status(self) -> None:
+        if not hasattr(self, "dashboard_labels"):
+            return
+        if not self.project_dir:
+            self._set_dashboard_value("project", "未载入项目", "bad")
+            self._set_dashboard_value("videos", "等待导入正式动作视频", "neutral")
+            self._set_dashboard_value("calibration_material", "等待校准素材", "neutral")
+            self._set_dashboard_value("calibration_toml", "缺少 calibration/*.toml", "bad")
+            self._set_dashboard_value("pose_sync", "未运行", "neutral")
+            self._set_dashboard_value("three_d", "未运行", "neutral")
+            self._set_dashboard_value("reports", "未生成", "neutral")
+            self._set_dashboard_value("next_step", "请选择或新建 Pose2Sim 项目。", "warn")
+            self.workflow_warning.setText("请选择或新建项目；普通用户不需要手写 Config.toml。")
+            if hasattr(self, "pipeline_prereq_label"):
+                self.pipeline_prereq_label.setText(self.workflow_warning.text())
+            self._set_run_button_states({"2d": False, "calibration": False, "full": False})
+            return
+
+        status = project_workflow_status(self.project_dir)
+        camera_text = ", ".join(status.camera_names) if status.camera_names else "未从视频名识别"
+        calib_names = ", ".join(file.name for file in status.calibration_toml_files) or "无"
+        materials = status.calibration_materials
+
+        self._set_dashboard_value("project", str(status.project_dir), "good" if status.has_config else "bad")
+        self._set_dashboard_value(
+            "videos",
+            f"{status.video_count} 个视频；相机名：{camera_text}",
+            "good" if status.has_videos else "bad",
+        )
+        self._set_dashboard_value(
+            "calibration_material",
+            (
+                f"内参素材 {materials.intrinsics_file_count} 个；"
+                f"外参素材 {materials.extrinsics_file_count} 个；"
+                f"校准输入文件 {materials.calibration_input_file_count} 个"
+            ),
+            "good" if materials.has_any_calibration_input else "warn",
+        )
+        self._set_dashboard_value(
+            "calibration_toml",
+            f"{len(status.calibration_toml_files)} 个标定文件：{calib_names}",
+            "good" if status.has_calibration_toml else "bad",
+        )
+        self._set_dashboard_value(
+            "pose_sync",
+            f"2D JSON {status.pose_json_count} 个；同步 JSON {status.sync_json_count} 个",
+            "good" if status.has_sync_results else ("warn" if status.has_pose_results else "neutral"),
+        )
+        self._set_dashboard_value(
+            "three_d",
+            f"三维 .trc {len(status.trc_files)} 个",
+            "good" if status.has_3d_results else "neutral",
+        )
+        self._set_dashboard_value(
+            "reports",
+            f"OpenSim .mot {len(status.mot_files)} 个",
+            "good" if status.has_reports else "neutral",
+        )
+        self._set_dashboard_value("next_step", status.recommended_next_step, "warn")
+
+        if not status.has_calibration_toml:
+            warning = (
+                "完整 3D/OpenSim 已禁用：项目 calibration/ 中没有 .toml 标定文件。"
+                "请先导入已有 Calib.toml，或拍摄内参/外参素材后运行校准。"
+            )
+        elif not status.has_videos:
+            warning = "请先导入正式动作视频。"
+        else:
+            warning = "已满足完整 3D/OpenSim 的基本前置条件；仍建议先运行 2D/同步检查。"
+        self.workflow_warning.setText(warning)
+        if hasattr(self, "pipeline_prereq_label"):
+            self.pipeline_prereq_label.setText(warning)
+
+        self._set_run_button_states(
+            {
+                "2d": status.can_run_2d_sync,
+                "calibration": status.can_run_calibration,
+                "full": status.can_run_full_3d,
+            }
+        )
 
     def populate_beginner_controls(self) -> None:
         if self.config is None:
@@ -896,6 +1381,41 @@ class Pose2SimMainWindow(QMainWindow):
         self.use_simple_model.setChecked(bool(get_nested(cfg, ["kinematics", "use_simple_model"], False)))
         self.right_left_symmetry.setChecked(bool(get_nested(cfg, ["kinematics", "right_left_symmetry"], True)))
         self.default_height.setValue(float(get_nested(cfg, ["kinematics", "default_height"], 1.7)))
+        self.populate_calibration_wizard_controls()
+
+    def populate_calibration_wizard_controls(self) -> None:
+        if self.config is None or not hasattr(self, "wizard_calibration_type"):
+            return
+        cfg = self.config
+        calibration_type = get_nested(cfg, ["calibration", "calibration_type"], "convert")
+        self._set_combo_value(self.wizard_calibration_type, calibration_type)
+        self._set_combo_value(self.wizard_convert_from, get_nested(cfg, ["calibration", "convert", "convert_from"], "qualisys"))
+        self.wizard_intrinsics_extension.setText(
+            str(get_nested(cfg, ["calibration", "calculate", "intrinsics", "intrinsics_extension"], "mp4"))
+        )
+        self.wizard_extrinsics_extension.setText(
+            str(get_nested(cfg, ["calibration", "calculate", "extrinsics", "extrinsics_extension"], "mp4"))
+        )
+        corners = get_nested(cfg, ["calibration", "calculate", "intrinsics", "intrinsics_corners_nb"], [8, 5])
+        if isinstance(corners, (list, tuple)) and len(corners) >= 2:
+            self.wizard_intrinsics_corners.setText(f"{corners[0]}, {corners[1]}")
+        else:
+            self.wizard_intrinsics_corners.setText(str(corners))
+        self.wizard_intrinsics_square.setValue(
+            float(get_nested(cfg, ["calibration", "calculate", "intrinsics", "intrinsics_square_size"], 25.0))
+        )
+        self._set_combo_value(
+            self.wizard_extrinsics_method,
+            get_nested(cfg, ["calibration", "calculate", "extrinsics", "extrinsics_method"], "scene"),
+        )
+        object_points = get_nested(cfg, ["calibration", "calculate", "extrinsics", "scene", "object_coords_3d"], [])
+        if isinstance(object_points, list) and object_points:
+            rows: list[dict[str, float | str]] = []
+            for index, point in enumerate(object_points):
+                if isinstance(point, (list, tuple)) and len(point) >= 3:
+                    rows.append({"name": f"P{index + 1:02d}", "x": point[0], "y": point[1], "z": point[2]})
+            if rows:
+                self._load_scene_points_table(rows)
 
     def _set_combo_value(self, combo: QComboBox, value: Any) -> None:
         text = str(value)
@@ -963,9 +1483,88 @@ class Pose2SimMainWindow(QMainWindow):
             message = "新手参数已保存。"
             if warnings:
                 message += "\n\n" + "\n".join(warnings)
+            self.refresh_workflow_status()
             QMessageBox.information(self, "已保存", message)
         except Exception as exc:
             self._error("无法保存参数", exc)
+
+    def _parse_intrinsics_corners(self) -> list[int]:
+        text = self.wizard_intrinsics_corners.text().strip().lower().replace("x", ",")
+        parts = [part.strip() for part in text.replace("，", ",").split(",") if part.strip()]
+        if len(parts) != 2:
+            raise ValueError("棋盘格内角点数必须填写为两个整数，例如 8, 5。")
+        corners = [int(parts[0]), int(parts[1])]
+        if corners[0] <= 0 or corners[1] <= 0:
+            raise ValueError("棋盘格内角点数必须大于 0。")
+        return corners
+
+    def save_calibration_wizard_settings(self) -> None:
+        if not self.project_dir or self.config is None:
+            self._message("尚未载入项目", "请先选择或新建一个项目。")
+            return
+        try:
+            cfg = self.config
+            route = self._combo_value(self.calibration_route)
+            calibration_type = self._combo_value(self.wizard_calibration_type)
+            if route == "calculate":
+                calibration_type = "calculate"
+
+            set_nested(cfg, ["calibration", "calibration_type"], calibration_type)
+            set_nested(cfg, ["calibration", "convert", "convert_from"], self._combo_value(self.wizard_convert_from))
+            set_nested(
+                cfg,
+                ["calibration", "calculate", "intrinsics", "intrinsics_extension"],
+                self.wizard_intrinsics_extension.text().strip() or "mp4",
+            )
+            set_nested(
+                cfg,
+                ["calibration", "calculate", "intrinsics", "intrinsics_corners_nb"],
+                self._parse_intrinsics_corners(),
+            )
+            set_nested(
+                cfg,
+                ["calibration", "calculate", "intrinsics", "intrinsics_square_size"],
+                self.wizard_intrinsics_square.value(),
+            )
+            set_nested(
+                cfg,
+                ["calibration", "calculate", "extrinsics", "extrinsics_method"],
+                self._combo_value(self.wizard_extrinsics_method),
+            )
+            set_nested(
+                cfg,
+                ["calibration", "calculate", "extrinsics", "extrinsics_extension"],
+                self.wizard_extrinsics_extension.text().strip() or "mp4",
+            )
+
+            scene_points = self._scene_points_from_table()
+            if self._combo_value(self.wizard_extrinsics_method) == "scene":
+                set_nested(
+                    cfg,
+                    ["calibration", "calculate", "extrinsics", "scene", "object_coords_3d"],
+                    [[point["x"], point["y"], point["z"]] for point in scene_points] if scene_points else [],
+                )
+
+            warnings = apply_beginner_safety(cfg)
+            save_config(self.project_dir, cfg)
+            self.config = load_config(self.project_dir)
+            self.populate_beginner_controls()
+            self.toml_editor.setPlainText(load_config_text(self.project_dir))
+            self.toml_status.setText("Config.toml 已保存")
+            self.refresh_workflow_status()
+
+            message = "校准设置已保存到 Config.toml。"
+            if self._combo_value(self.wizard_extrinsics_method) == "scene" and len(scene_points) < 10:
+                message += "\n\n提示：scene 外参建议至少 10 个分散且可测量的 3D 场景点。"
+            if route == "existing":
+                message += "\n\n如果已经有 Calib.toml，请把它放入项目的 calibration/ 文件夹，然后刷新状态。"
+            elif route == "two_d_only":
+                message += "\n\n当前选择为仅做 2D/同步检查；没有 Calib.toml 时不会运行完整 3D/OpenSim。"
+            if warnings:
+                message += "\n\n" + "\n".join(warnings)
+            QMessageBox.information(self, "已保存", message)
+        except Exception as exc:
+            self._error("无法保存校准设置", exc)
 
     def validate_toml_editor(self) -> None:
         ok, message = validate_toml_text(self.toml_editor.toPlainText())
@@ -983,15 +1582,46 @@ class Pose2SimMainWindow(QMainWindow):
             self.config = load_config(self.project_dir)
             self.populate_beginner_controls()
             self.toml_status.setText("Config.toml 已保存")
+            self.refresh_workflow_status()
             QMessageBox.information(self, "已保存", "Config.toml 已保存。")
         except Exception as exc:
             self._error("无法保存 TOML", exc)
 
-    def run_pipeline(self) -> None:
+    def run_stage_preset(self, stages: tuple[str, ...]) -> None:
+        if not self.project_dir:
+            self._message("尚未载入项目", "请先选择或新建一个项目。")
+            return
+        status = project_workflow_status(self.project_dir)
+        if stages == TWO_D_SYNC_STAGES and not status.can_run_2d_sync:
+            self._message("无法运行 2D/同步", "请先导入正式动作视频到 videos/。")
+            return
+        if stages == CALIBRATION_STAGES and not status.can_run_calibration:
+            self._message(
+                "无法运行校准",
+                "请先把棋盘格内参素材和场景点/棋盘格外参素材放入 calibration/，"
+                "或把已有标定文件放入 calibration/。",
+            )
+            return
+        if stages == FULL_3D_REPORT_STAGES and not status.can_run_full_3d:
+            self._message(
+                "无法运行完整 3D + 报告",
+                "完整 3D/OpenSim 必须先有 calibration/*.toml。请先运行校准或导入已有 Calib.toml。",
+            )
+            return
+        for stage, check in self.stage_checks.items():
+            check.setChecked(stage in stages)
+        self.run_pipeline(stages)
+
+    def run_pipeline(self, selected_stages: Iterable[str] | None = None) -> None:
         if not self.project_dir:
             self._message("尚未载入项目", "请先载入一个项目。")
             return
-        stages = [stage for stage, check in self.stage_checks.items() if check.isChecked()]
+        if self.process is not None:
+            self._message("正在运行", "当前已有 Pose2Sim 流程在运行，请等待结束或先停止。")
+            return
+        stages = list(selected_stages) if selected_stages is not None else [
+            stage for stage, check in self.stage_checks.items() if check.isChecked()
+        ]
         if not stages:
             self._message("未选择流程步骤", "请至少选择一个 Pose2Sim 处理步骤。")
             return
@@ -1007,8 +1637,7 @@ class Pose2SimMainWindow(QMainWindow):
         self.process.finished.connect(self._process_finished)
         args = ["-m", "pose2sim_gui.runner", "--config", str(self.project_dir), "--stages", *stages]
         self.pipeline_log.appendPlainText(f"正在运行：{sys.executable} {' '.join(args)}\n")
-        self.run_btn.setEnabled(False)
-        self.stop_btn.setEnabled(True)
+        self._set_run_button_states({"2d": False, "calibration": False, "full": False})
         self.process.start(sys.executable, args)
 
     def _append_process_output(self) -> None:
@@ -1021,13 +1650,12 @@ class Pose2SimMainWindow(QMainWindow):
             self.pipeline_log.moveCursor(self.pipeline_log.textCursor().MoveOperation.End)
 
     def _process_finished(self, exit_code: int, _exit_status: QProcess.ExitStatus) -> None:
-        self.run_btn.setEnabled(True)
-        self.stop_btn.setEnabled(False)
         self.pipeline_log.appendPlainText(f"\n流程结束，退出码：{exit_code}。")
+        self.process = None
         if exit_code == 0:
             self.generate_auto_reports()
         self.refresh_report_files()
-        self.process = None
+        self.refresh_workflow_status()
 
     def stop_pipeline(self) -> None:
         if self.process:

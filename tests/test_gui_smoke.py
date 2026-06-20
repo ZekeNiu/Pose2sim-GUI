@@ -13,7 +13,9 @@ class GuiSmokeTests(unittest.TestCase):
         app = create_app([])
         window = Pose2SimMainWindow()
         self.assertEqual(window.windowTitle(), "Pose2Sim 图形界面")
-        self.assertEqual(window.tabs.count(), 5)
+        self.assertEqual(window.tabs.count(), 6)
+        self.assertEqual(window.tabs.tabText(0), "向导")
+        self.assertFalse(window.run_full_3d_btn.isEnabled())
         window.close()
         app.processEvents()
 

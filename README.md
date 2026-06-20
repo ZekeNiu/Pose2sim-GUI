@@ -93,3 +93,18 @@ D:\Application\Anaconda\envs\sports3d\python.exe -m unittest discover -s tests
 ## 详细说明
 
 见 [docs/中文使用说明.md](docs/中文使用说明.md)。
+
+## 新手向导工作流
+
+当前版本把普通用户流程调整为“向导优先”：
+
+1. 在“向导”页选择或新建项目，GUI 会自动创建 `Config.toml` 和标准文件夹。
+2. 导入正式动作视频到 `videos/`。
+3. 点击“创建校准文件夹”，GUI 会根据视频名创建 `calibration/intrinsics/<相机名>/` 与 `calibration/extrinsics/<相机名>/`。
+4. 普通手机项目先补拍/导入校准素材：每台相机的棋盘格内参素材，以及固定机位后的 scene 场景点外参素材。
+5. 在校准向导中填写棋盘格参数、外参方法和 3D 场景点，保存到 `Config.toml`。
+6. 先运行“校准”生成 `calibration/*.toml`，再运行“只检查 2D/同步”，最后运行“完整 3D + 报告”。
+
+没有 `calibration/*.toml` 时，GUI 会禁用完整 3D/OpenSim 流程。此时只能做 2D 姿态识别和同步质量检查，不能生成可信的 3D 轨迹或关节活动度。
+
+本 GUI 不连接手机或摄像头做实时录制、硬件同步或实时校准。它处理已经录制好的多机位视频，并通过 Pose2Sim 完成后处理分析。
