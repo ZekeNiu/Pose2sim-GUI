@@ -1,0 +1,228 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from pathlib import Path
+import shutil
+from typing import Any, Iterable
+
+import toml
+
+
+STAGES: tuple[str, ...] = (
+    "calibration",
+    "poseEstimation",
+    "synchronization",
+    "personAssociation",
+    "triangulation",
+    "filtering",
+    "markerAugmentation",
+    "kinematics",
+)
+
+RUNALL_FLAGS: dict[str, str] = {
+    "calibration": "do_calibration",
+    "poseEstimation": "do_poseEstimation",
+    "synchronization": "do_synchronization",
+    "personAssociation": "do_personAssociation",
+    "triangulation": "do_triangulation",
+    "filtering": "do_filtering",
+    "markerAugmentation": "do_markerAugmentation",
+    "kinematics": "do_kinematics",
+}
+
+POSE_MODELS: tuple[str, ...] = (
+    "Body_with_feet",
+    "Whole_body_wrist",
+    "Whole_body",
+    "Lower_body",
+    "Body",
+    "Hand",
+    "Face",
+    "Animal",
+)
+
+POSE_MODES: tuple[str, ...] = ("lightweight", "balanced", "performance")
+DEVICES: tuple[str, ...] = ("auto", "CPU", "CUDA", "MPS", "ROCM")
+BACKENDS: tuple[str, ...] = ("auto", "openvino", "onnxruntime", "opencv")
+TRACKING_MODES: tuple[str, ...] = ("sports2d", "none", "deepsort")
+FILTER_TYPES: tuple[str, ...] = (
+    "butterworth",
+    "kalman",
+    "one_euro",
+    "gcv_spline",
+    "gaussian",
+    "LOESS",
+    "median",
+    "butterworth_on_speed",
+)
+
+
+@dataclass(frozen=True)
+class ProjectStatus:
+    project_dir: Path
+    has_config: bool
+    has_videos: bool
+    has_calibration: bool
+    mot_files: tuple[Path, ...]
+
+    @property
+    def ready_for_config(self) -> bool:
+        return self.has_config
+
+    def summary_lines(self) -> list[str]:
+        return [
+            f"Project: {self.project_dir}",
+            f"Config.toml: {'found' if self.has_config else 'missing'}",
+            f"videos folder: {'found' if self.has_videos else 'missing'}",
+            f"calibration folder: {'found' if self.has_calibration else 'missing'}",
+            f"kinematics .mot files: {len(self.mot_files)}",
+        ]
+
+
+def demo_config_path() -> Path:
+    import Pose2Sim
+
+    package_dir = Path(Pose2Sim.__file__).resolve().parent
+    demo_path = package_dir / "Demo_SinglePerson" / "Config.toml"
+    if not demo_path.exists():
+        raise FileNotFoundError(f"Pose2Sim demo Config.toml not found at {demo_path}")
+    return demo_path
+
+
+def copy_demo_config(project_dir: Path) -> Path:
+    project_dir = Path(project_dir).resolve()
+    project_dir.mkdir(parents=True, exist_ok=True)
+    destination = project_dir / "Config.toml"
+    if destination.exists():
+        raise FileExistsError(f"{destination} already exists")
+    shutil.copy2(demo_config_path(), destination)
+    return destination
+
+
+def validate_toml_text(text: str) -> tuple[bool, str]:
+    try:
+        toml.loads(text)
+    except Exception as exc:  # toml raises multiple parser exceptions.
+        return False, str(exc)
+    return True, "TOML is valid."
+
+
+def load_config(project_dir: Path) -> dict[str, Any]:
+    config_path = Path(project_dir) / "Config.toml"
+    if not config_path.exists():
+        raise FileNotFoundError(f"No Config.toml found in {Path(project_dir).resolve()}")
+    return toml.load(config_path)
+
+
+def load_config_text(project_dir: Path) -> str:
+    return (Path(project_dir) / "Config.toml").read_text(encoding="utf-8")
+
+
+def save_config(project_dir: Path, config: dict[str, Any]) -> Path:
+    config_path = Path(project_dir) / "Config.toml"
+    config_path.write_text(toml.dumps(config), encoding="utf-8")
+    return config_path
+
+
+def save_config_text(project_dir: Path, text: str) -> Path:
+    ok, message = validate_toml_text(text)
+    if not ok:
+        raise ValueError(message)
+    config_path = Path(project_dir) / "Config.toml"
+    config_path.write_text(text, encoding="utf-8")
+    return config_path
+
+
+def get_nested(config: dict[str, Any], path: Iterable[str], default: Any = None) -> Any:
+    cursor: Any = config
+    for key in path:
+        if not isinstance(cursor, dict) or key not in cursor:
+            return default
+        cursor = cursor[key]
+    return cursor
+
+
+def set_nested(config: dict[str, Any], path: Iterable[str], value: Any) -> None:
+    keys = list(path)
+    cursor = config
+    for key in keys[:-1]:
+        cursor = cursor.setdefault(key, {})
+    cursor[keys[-1]] = value
+
+
+def parse_toml_value(text: str) -> Any:
+    stripped = text.strip()
+    if stripped == "":
+        return ""
+    try:
+        return toml.loads(f"value = {stripped}")["value"]
+    except Exception:
+        return stripped.strip("'\"")
+
+
+def display_toml_value(value: Any) -> str:
+    if isinstance(value, str):
+        return value
+    return toml.dumps({"value": value}).split("=", 1)[1].strip()
+
+
+def project_status(project_dir: Path) -> ProjectStatus:
+    project_dir = Path(project_dir).resolve()
+    mot_files = tuple(sorted(project_dir.rglob("kinematics/*.mot"))) if project_dir.exists() else ()
+    return ProjectStatus(
+        project_dir=project_dir,
+        has_config=(project_dir / "Config.toml").exists(),
+        has_videos=(project_dir / "videos").is_dir(),
+        has_calibration=any(
+            child.is_dir() and "calib" in child.name.lower()
+            for child in project_dir.iterdir()
+        )
+        if project_dir.exists()
+        else False,
+        mot_files=mot_files,
+    )
+
+
+def apply_beginner_safety(config: dict[str, Any]) -> list[str]:
+    """Force settings that should not be exposed in the beginner form."""
+
+    warnings: list[str] = []
+    pose = config.setdefault("pose", {})
+    pose["output_format"] = "openpose"
+
+    for key in ("handle_LR_swap", "undistort_points"):
+        if pose.get(key):
+            warnings.append(f"Disabled pose.{key}; it is not implemented safely in Pose2Sim yet.")
+        pose[key] = False
+
+    if pose.get("display_detection", True) and pose.get("parallel_workers_pose") not in (False, 0, 1):
+        pose["parallel_workers_pose"] = False
+        warnings.append("Set pose.parallel_workers_pose=false because display_detection=true.")
+
+    extrinsics = (
+        config.setdefault("calibration", {})
+        .setdefault("calculate", {})
+        .setdefault("extrinsics", {})
+    )
+    if extrinsics.get("moving_cameras"):
+        warnings.append("Disabled calibration moving_cameras; it is not implemented yet.")
+    extrinsics["moving_cameras"] = False
+
+    if extrinsics.get("extrinsics_method") == "keypoints":
+        extrinsics["extrinsics_method"] = "scene"
+        warnings.append("Changed extrinsics_method from keypoints to scene; keypoints is not ready.")
+
+    mode = pose.get("mode", "balanced")
+    if isinstance(mode, str) and mode.strip().startswith("{"):
+        pose["mode"] = "balanced"
+        warnings.append("Reset custom pose.mode dictionary to balanced in beginner mode.")
+
+    return warnings
+
+
+def selected_stages_to_runall_kwargs(stages: Iterable[str]) -> dict[str, bool]:
+    selected = set(stages)
+    unknown = selected.difference(STAGES)
+    if unknown:
+        raise ValueError(f"Unknown stages: {', '.join(sorted(unknown))}")
+    return {flag: stage in selected for stage, flag in RUNALL_FLAGS.items()}

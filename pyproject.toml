@@ -1,0 +1,20 @@
+[project]
+name = "pose2sim-gui"
+version = "0.1.0"
+description = "Windows desktop GUI for Pose2Sim workflows and OpenSim joint angle reports."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "pose2sim",
+  "PySide6",
+  "toml",
+  "pandas",
+  "plotly",
+  "openpyxl",
+]
+
+[project.scripts]
+pose2sim-gui = "pose2sim_gui.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["pose2sim_gui*"]

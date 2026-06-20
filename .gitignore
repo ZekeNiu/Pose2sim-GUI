@@ -1,0 +1,36 @@
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+build/
+dist/
+*.egg-info/
+
+# Pose2Sim and report outputs generated from user projects
+logs.txt
+opensim_logs.txt
+reports/
+pose-2d/
+pose-2d-tracked/
+pose-2d-sync/
+pose-3d/
+kinematics/
+*.c3d
+*.trc
+*.mot
+*.osim
+
+# Local IDE and OS files
+work/
+outputs/
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store
