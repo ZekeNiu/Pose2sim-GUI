@@ -16,6 +16,7 @@ STAGE_LABELS: dict[str, str] = {
 HELP_TEXTS: dict[str, str] = {
     "project_folder": (
         "Pose2Sim 的分析对象是一个项目文件夹。单次分析通常包含 Config.toml、videos/ 和 calibration/。"
+        "普通用户不需要手写 Config.toml；选择空文件夹时，GUI 会自动复制默认配置并创建标准文件夹。"
         "videos/ 放多个相机录制的视频；calibration/ 放相机校准文件或用于计算校准的图像/视频。"
         "Pose2Sim 会在项目中生成 pose/、pose-sync/、pose-3d/、kinematics/ 等结果文件夹。"
     ),
@@ -106,7 +107,7 @@ MANUAL_TEXT = """
 - `input/calibration/`：校准素材暂存区。
 - `output/pose2sim_results/`：GUI 新建项目和 Pose2Sim 结果的集中位置，包含 `pose/`、`pose-sync/`、`pose-associated/`、`pose-3d/`、`kinematics/` 和 `reports/`。
 
-Pose2Sim 本身仍然读取每个项目内的 `videos/` 与 `calibration/`。GUI 新建项目默认就在 `output/pose2sim_results/<项目名>/`，因此 Pose2Sim 结果会直接生成在那里，报告放在同一项目的 `reports/` 子目录。若打开外部项目，GUI 会同步一份结果到 `output/pose2sim_results/<项目名>/`，但不会自动删除外部项目中的原始结果。
+Pose2Sim 本身仍然读取每个项目内的 `videos/`、`calibration/` 和 `Config.toml`。普通用户不需要手写 `Config.toml`：在“项目”页选择或新建一个文件夹后，如果里面没有 `Config.toml`，GUI 会自动复制默认配置，并创建 `videos/`、`calibration/`、`reports/`。GUI 新建项目默认就在 `output/pose2sim_results/<项目名>/`，因此 Pose2Sim 结果会直接生成在那里，报告放在同一项目的 `reports/` 子目录。若打开外部项目，GUI 会同步一份结果到 `output/pose2sim_results/<项目名>/`，但不会自动删除外部项目中的原始结果。
 
 ## 2. 录制好的视频是否支持
 
@@ -121,14 +122,20 @@ Pose2Sim 本身仍然读取每个项目内的 `videos/` 与 `calibration/`。GUI
 
 ## 3. 推荐操作流程
 
-1. 在“项目”页选择或新建项目。
-2. 点击“创建标准文件夹”，确保存在 `videos/`、`calibration/`、`reports/`。
+1. 在“项目”页选择或新建项目文件夹；若没有 `Config.toml`，GUI 会自动创建默认配置和标准文件夹。
+2. 把校准文件或校准素材放入项目 `calibration/`。
 3. 点击“导入录制视频”，把多机位视频复制到 `videos/`。
 4. 在“参数”页先使用新手参数；只有明确知道含义时再改高级 TOML。
 5. 在“流程”页按顺序运行：相机校准、二维姿态识别、多相机同步、人物匹配、三维重建、轨迹滤波、虚拟标记点增强、OpenSim 运动学。
 6. 运行流程成功结束后，GUI 会自动同步 Pose2Sim 结果，并从 `kinematics/*.mot` 生成 Excel 与 HTML。也可以在“报告”页手动重新生成。
 
-## 4. Pose2Sim 会输出什么
+## 4. 是否支持连接多摄像头实时录制
+
+当前不支持。本 GUI 处理的是已经录制好的多机位视频；Pose2Sim 负责后续的二维姿态识别、同步、三维重建、滤波和 OpenSim 运动学。它不是多摄像头采集软件，不直接提供实时摄像头枚举、同步触发、录制、丢帧监控或实时校准。
+
+建议用相机厂商软件、OBS/ffmpeg、Qualisys、Vicon、OptiTrack、Caliscope、FreeMoCap、OpenCap 等工具完成采集和/或校准，再把视频与校准文件导入本 GUI。没有硬件同步时，录制时应加入清晰同步动作，例如快速跳跃、拍手、闪光或快速抬手。
+
+## 5. Pose2Sim 会输出什么
 
 完成 OpenSim 运动学后，Pose2Sim 会在 `kinematics/` 中输出：
 
@@ -138,7 +145,7 @@ Pose2Sim 本身仍然读取每个项目内的 `videos/` 与 `calibration/`。GUI
 
 三维点轨迹通常在 `pose-3d/` 中以 `.trc` 保存。
 
-## 5. 本 GUI 的覆盖范围
+## 6. 本 GUI 的覆盖范围
 
 本 GUI 覆盖 Pose2Sim 主流程：项目管理、常用参数、完整 TOML 编辑、八个 pipeline 阶段、视频导入、日志查看、HTML/Excel 报告。高级页允许访问完整 `Config.toml`，所以没有被新手页表单覆盖的 Pose2Sim 参数仍然可以编辑。
 

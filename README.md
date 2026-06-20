@@ -37,7 +37,7 @@ D:\Application\Biomechanics\Pose2sim\
 
 `input/` 和 `output/` 已被 `.gitignore` 忽略，不会推送到 GitHub。
 
-每次分析仍建议建立一个独立 Pose2Sim 项目：
+每次分析仍建议建立一个独立 Pose2Sim 项目。普通用户不需要手写 `Config.toml`：在 GUI 中选择或新建一个项目文件夹后，如果里面没有 `Config.toml`，GUI 会自动复制 Pose2Sim 内置默认配置，并创建 `videos/`、`calibration/`、`reports/`。
 
 ```text
 我的项目/
@@ -55,7 +55,7 @@ D:\Application\Biomechanics\Pose2sim\
 
 - 中文桌面 GUI。
 - 每个常用参数右侧有“？”按钮，可弹出专业说明。
-- 可复制 Pose2Sim 内置示例配置新建项目。
+- 选择或新建项目文件夹时可自动复制 Pose2Sim 内置默认配置，无需用户手写 `Config.toml`。
 - 可创建标准项目文件夹：`videos/`、`calibration/`、`reports/`。
 - 可把已经录制好的视频导入项目 `videos/`。
 - 支持运行 Pose2Sim 八个主流程：相机校准、二维姿态识别、多相机同步、人物匹配、三维重建、轨迹滤波、虚拟标记点增强、OpenSim 运动学。
@@ -63,6 +63,12 @@ D:\Application\Biomechanics\Pose2sim\
 - 流程成功结束后自动把 Pose2Sim 结果集中到 `output\pose2sim_results\<项目名>\`，包括 `kinematics/*.mot`、`*.osim` 和 `pose-3d/*.trc` 等。
 - 流程成功结束后自动从 `kinematics/*.mot` 生成 Excel 与交互式 HTML 报告；报告放在 `output\pose2sim_results\<项目名>\reports\`，报告页也可手动重新生成。
 - HTML 报告优先使用 Pose2Sim 生成的处理后视频 `pose/*_pose.mp4`，会把视频准备到报告目录的 `media/` 子文件夹并尽量转为浏览器兼容 MP4。
+
+## 关于摄像头实时录制
+
+Pose2Sim 的常规工作流是处理已经录制好的多机位视频，并通过校准、同步、三维重建和 OpenSim 运动学得到结果。本 GUI 当前也采用这一工作流：导入录制好的视频和校准素材后再分析。
+
+当前版本不直接连接多台摄像头进行实时录制、实时同步或实时校准。若需要采集端一体化，建议使用相机厂商软件、OBS/ffmpeg、Qualisys/Vicon/OptiTrack、Caliscope、FreeMoCap、OpenCap 等工具完成采集和/或校准，再把视频与校准文件导入本 GUI。
 
 ## 命令行
 

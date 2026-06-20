@@ -100,6 +100,17 @@ def copy_demo_config(project_dir: Path) -> Path:
     return destination
 
 
+def ensure_project_config(project_dir: Path) -> tuple[Path, bool]:
+    project_dir = Path(project_dir).resolve()
+    project_dir.mkdir(parents=True, exist_ok=True)
+    ensure_standard_project_folders(project_dir)
+    destination = project_dir / "Config.toml"
+    if destination.exists():
+        return destination, False
+    shutil.copy2(demo_config_path(), destination)
+    return destination, True
+
+
 def ensure_standard_project_folders(project_dir: Path) -> list[Path]:
     project_dir = Path(project_dir).resolve()
     created_or_existing: list[Path] = []

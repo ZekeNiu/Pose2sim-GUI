@@ -33,6 +33,7 @@ input/
 output/
 outputs/
 user_projects/
+projects/
 .vscode/
 .idea/
 Thumbs.db

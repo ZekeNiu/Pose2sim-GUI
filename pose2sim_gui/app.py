@@ -43,9 +43,9 @@ from .config import (
     STAGES,
     TRACKING_MODES,
     apply_beginner_safety,
-    copy_demo_config,
     demo_config_path,
     display_toml_value,
+    ensure_project_config,
     ensure_standard_project_folders,
     get_nested,
     load_config,
@@ -246,14 +246,14 @@ class Pose2SimMainWindow(QMainWindow):
         group = QGroupBox("项目文件夹")
         grid = QGridLayout(group)
         self.project_edit = QLineEdit()
-        self.project_edit.setPlaceholderText("请选择包含 Config.toml 的 Pose2Sim 项目文件夹")
+        self.project_edit.setPlaceholderText("请选择或新建 Pose2Sim 分析项目文件夹")
 
-        browse_btn = QPushButton(self._icon(QStyle.SP_DirOpenIcon), "浏览项目")
-        browse_btn.setToolTip("选择已有 Pose2Sim 项目文件夹")
+        browse_btn = QPushButton(self._icon(QStyle.SP_DirOpenIcon), "选择/新建项目")
+        browse_btn.setToolTip("选择一个项目文件夹；若缺少 Config.toml，GUI 会自动创建默认配置")
         browse_btn.clicked.connect(self.choose_project)
 
-        create_btn = QPushButton(self._icon(QStyle.SP_FileDialogNewFolder), "用示例配置新建")
-        create_btn.setToolTip("在空文件夹中复制 Pose2Sim 示例 Config.toml，并创建标准文件夹")
+        create_btn = QPushButton(self._icon(QStyle.SP_FileDialogNewFolder), "新建分析项目")
+        create_btn.setToolTip("选择或创建一个文件夹，GUI 会自动复制默认 Config.toml 并创建标准文件夹")
         create_btn.clicked.connect(self.create_project_from_demo)
 
         demo_btn = QPushButton(self._icon(QStyle.SP_ComputerIcon), "打开内置示例")
@@ -309,7 +309,8 @@ class Pose2SimMainWindow(QMainWindow):
         layout.addWidget(self.status_text, 1)
 
         note = QLabel(
-            "推荐结构：Config.toml、videos/、calibration/。录制好的视频放入 videos/；校准文件或校准素材放入 calibration/；"
+            "推荐流程：选择或新建项目文件夹 → GUI 自动准备 Config.toml 和标准文件夹 → 导入录制视频/校准素材 → 调整参数 → 运行流程。"
+            "Pose2Sim 实际读取项目内的 videos/、calibration/ 和 Config.toml；"
             "Pose2Sim 会自动生成 pose/、pose-sync/、pose-associated/、pose-3d/、kinematics/；"
             "本 GUI 会把这些结果集中到 output/pose2sim_results/<项目名>/，报告放在其中的 reports/ 子目录。"
         )
@@ -743,18 +744,19 @@ class Pose2SimMainWindow(QMainWindow):
 
     def choose_project(self) -> None:
         start_dir = str(self.project_dir or RESULTS_DIR)
-        folder = QFileDialog.getExistingDirectory(self, "选择 Pose2Sim 项目文件夹", start_dir)
+        folder = QFileDialog.getExistingDirectory(self, "选择或新建 Pose2Sim 分析项目文件夹", start_dir)
         if folder:
-            self.load_project(Path(folder))
+            self.load_project(Path(folder), create_if_missing=True)
 
     def create_project_from_demo(self) -> None:
         folder = QFileDialog.getExistingDirectory(self, "选择新 Pose2Sim 项目文件夹", str(RESULTS_DIR))
         if not folder:
             return
         try:
-            path = copy_demo_config(Path(folder))
+            path, created = ensure_project_config(Path(folder))
             self.load_project(path.parent)
-            self.status_text.appendPlainText(f"已创建：{path}")
+            message = "已创建默认配置" if created else "已找到现有配置，未覆盖"
+            self.status_text.appendPlainText(f"{message}：{path}")
         except Exception as exc:
             self._error("无法创建项目", exc)
 
@@ -811,9 +813,13 @@ class Pose2SimMainWindow(QMainWindow):
         except Exception as exc:
             self._error("无法打开内置示例", exc)
 
-    def load_project(self, project_dir: Path) -> None:
+    def load_project(self, project_dir: Path, create_if_missing: bool = False) -> None:
         project_dir = Path(project_dir).resolve()
         try:
+            if create_if_missing:
+                config_path, created = ensure_project_config(project_dir)
+                if created:
+                    self.status_text.appendPlainText(f"已自动创建默认 Config.toml：{config_path}")
             self.config = load_config(project_dir)
             self.project_dir = project_dir
             self.project_edit.setText(str(project_dir))
