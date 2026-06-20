@@ -30,6 +30,7 @@ D:\Application\Biomechanics\Pose2sim\
     calibration\    # 校准素材暂存
   output\
     reports\        # 自动生成的 HTML 与 Excel 报告
+    pose2sim_results\ # Pose2Sim 本体结果镜像：pose、pose-3d、kinematics 等
 ```
 
 `input/` 和 `output/` 已被 `.gitignore` 忽略，不会推送到 GitHub。
@@ -46,7 +47,7 @@ D:\Application\Biomechanics\Pose2sim\
     Calib.toml 或 intrinsics/、extrinsics/
 ```
 
-`videos/` 和 `calibration/` 是 Pose2Sim 读取的输入；Pose2Sim 会自动生成 `pose/`、`pose-sync/`、`pose-3d/`、`kinematics/` 等结果。本 GUI 生成的 HTML 和 Excel 默认集中放入 `D:\Application\Biomechanics\Pose2sim\output\reports\<项目名>\`。
+`videos/` 和 `calibration/` 是 Pose2Sim 读取的输入；Pose2Sim 会先在项目目录内生成 `pose/`、`pose-sync/`、`pose-associated/`、`pose-3d/`、`kinematics/` 等结果。流程成功结束后，本 GUI 会把这些结果镜像到 `D:\Application\Biomechanics\Pose2sim\output\pose2sim_results\<项目名>\`，并把 HTML 和 Excel 报告放入 `D:\Application\Biomechanics\Pose2sim\output\reports\<项目名>\`。
 
 ## 主要功能
 
@@ -57,8 +58,9 @@ D:\Application\Biomechanics\Pose2sim\
 - 可把已经录制好的视频导入项目 `videos/`。
 - 支持运行 Pose2Sim 八个主流程：相机校准、二维姿态识别、多相机同步、人物匹配、三维重建、轨迹滤波、虚拟标记点增强、OpenSim 运动学。
 - 支持高级 `Config.toml` 直接编辑。
+- 流程成功结束后自动同步 Pose2Sim 结果到 `output\pose2sim_results\<项目名>\`，包括 `kinematics/*.mot`、`*.osim` 和 `pose-3d/*.trc` 等。
 - 流程成功结束后自动从 `kinematics/*.mot` 生成 Excel 与交互式 HTML 报告；报告页也可手动重新生成。
-- HTML 报告优先使用 Pose2Sim 生成的处理后视频 `pose/*_pose.mp4`，并同步显示全部处理后视频。
+- HTML 报告优先使用 Pose2Sim 生成的处理后视频 `pose/*_pose.mp4`，会把视频准备到报告目录的 `media/` 子文件夹并尽量转为浏览器兼容 MP4。
 
 ## 命令行
 

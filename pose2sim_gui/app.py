@@ -59,7 +59,16 @@ from .config import (
 )
 from .help_text import HELP_TEXTS, MANUAL_TEXT, STAGE_LABELS
 from .reports import default_report_dir, export_excel, export_html, find_mot_files, find_report_video_files
-from .workspace import APP_ROOT, INPUT_DIR, OUTPUT_DIR, PROJECTS_DIR, RAW_VIDEO_DIR, ensure_app_workspace
+from .workspace import (
+    APP_ROOT,
+    INPUT_DIR,
+    OUTPUT_DIR,
+    PROJECTS_DIR,
+    RAW_VIDEO_DIR,
+    ensure_app_workspace,
+    mirror_pose2sim_outputs,
+    project_results_dir,
+)
 
 
 POSE_MODEL_OPTIONS = [
@@ -279,8 +288,9 @@ class Pose2SimMainWindow(QMainWindow):
         workspace_text = QLabel(
             f"软件目录：{APP_ROOT}\n"
             f"输入暂存：{INPUT_DIR}\n"
-            f"报告输出：{OUTPUT_DIR}\n"
-            "新建项目默认建议放在 input/projects；Excel 和 HTML 报告会自动输出到 output/reports。"
+            f"报告输出：{OUTPUT_DIR}\\reports\n"
+            f"Pose2Sim 结果镜像：{OUTPUT_DIR}\\pose2sim_results\n"
+            "新建项目默认建议放在 input/projects；流程结束后会把 Pose2Sim 结果和报告都集中到 output。"
         )
         workspace_text.setWordWrap(True)
         workspace_text.setObjectName("HelpText")
@@ -301,7 +311,8 @@ class Pose2SimMainWindow(QMainWindow):
 
         note = QLabel(
             "推荐结构：Config.toml、videos/、calibration/。录制好的视频放入 videos/；校准文件或校准素材放入 calibration/；"
-            "Pose2Sim 会自动生成 pose/、pose-sync/、pose-3d/、kinematics/；本 GUI 会把报告集中放入软件目录的 output/reports/。"
+            "Pose2Sim 会自动生成 pose/、pose-sync/、pose-associated/、pose-3d/、kinematics/；"
+            "本 GUI 会把这些结果镜像到 output/pose2sim_results/，并把报告放入 output/reports/。"
         )
         note.setWordWrap(True)
         note.setObjectName("HelpText")
@@ -1051,6 +1062,17 @@ class Pose2SimMainWindow(QMainWindow):
     def generate_auto_reports(self) -> list[Path]:
         if not self.project_dir:
             return []
+        try:
+            mirrored = mirror_pose2sim_outputs(self.project_dir)
+            result_dir = project_results_dir(self.project_dir)
+            if mirrored:
+                self._log_report_message(f"\n已同步 Pose2Sim 结果到：{result_dir}")
+                self._log_report_message(f"  同步项目：{len(mirrored)} 个文件/文件夹")
+            else:
+                self._log_report_message(f"\n未发现可同步的 Pose2Sim 结果文件夹；目标目录：{result_dir}")
+        except Exception as exc:
+            self._log_report_message(f"\n同步 Pose2Sim 结果失败：{exc}")
+
         mots = find_mot_files(self.project_dir)
         if not mots:
             self._log_report_message("\n未找到 kinematics/*.mot，自动报告已跳过。请运行 OpenSim 运动学阶段后再生成报告。")
@@ -1067,7 +1089,7 @@ class Pose2SimMainWindow(QMainWindow):
             self._log_report_message(f"  HTML：{html_path}")
             for warning in warnings:
                 self._log_report_message(f"  提示：{warning}")
-        QDesktopServices.openUrl(QUrl.fromLocalFile(str(report_dir)))
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(OUTPUT_DIR)))
         return outputs
 
     def generate_excel_report(self) -> Path | None:
