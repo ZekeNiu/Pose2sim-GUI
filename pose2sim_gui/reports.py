@@ -32,12 +32,12 @@ def read_mot(mot_path: Path) -> tuple[pd.DataFrame, list[str]]:
                 header_end = index - 1
                 break
     if header_end is None:
-        raise ValueError(f"Could not find a data header in {mot_path}")
+        raise ValueError(f"无法在 {mot_path} 中找到 .mot 数据表头")
 
     header_lines = lines[: header_end + 1]
     data = pd.read_csv(mot_path, sep=r"\s+", skiprows=header_end + 1, engine="python")
     if "time" not in [str(col).lower() for col in data.columns]:
-        raise ValueError(f"{mot_path} does not contain a time column")
+        raise ValueError(f"{mot_path} 不包含 time 时间列")
     return data, header_lines
 
 
@@ -131,7 +131,7 @@ def maybe_transcode_video(video_path: Path | None, output_dir: Path) -> tuple[Pa
     ffmpeg = ffmpeg_executable()
     if not ffmpeg:
         warnings.append(
-            f"Video format {video_path.suffix} may not play in browsers, and ffmpeg was not found for conversion."
+            f"视频格式 {video_path.suffix} 可能无法在浏览器中播放，并且未找到 ffmpeg，无法自动转换。"
         )
         return video_path, warnings
 
@@ -154,10 +154,10 @@ def maybe_transcode_video(video_path: Path | None, output_dir: Path) -> tuple[Pa
     ]
     try:
         subprocess.run(command, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        warnings.append(f"Converted video for browser playback: {converted}")
+        warnings.append(f"已转换为浏览器兼容视频：{converted}")
         return converted, warnings
     except Exception as exc:
-        warnings.append(f"Could not convert video to MP4: {exc}")
+        warnings.append(f"无法转换视频为 MP4：{exc}")
         return video_path, warnings
 
 
@@ -175,9 +175,9 @@ def _figure_html(data: pd.DataFrame, angle_cols: list[str]) -> str:
             )
         )
     fig.update_layout(
-        title="OpenSim Joint Angles",
-        xaxis_title="Time (s)",
-        yaxis_title="Angle (deg)",
+        title="OpenSim 关节角",
+        xaxis_title="时间（秒）",
+        yaxis_title="角度（度）",
         hovermode="x",
         template="plotly_white",
         margin=dict(l=56, r=24, t=52, b=48),
@@ -196,7 +196,7 @@ def export_html(
     data, _ = read_mot(mot_path)
     angle_cols, translation_cols = split_motion_columns(data)
     if not angle_cols:
-        raise ValueError(f"No joint angle columns found in {mot_path}")
+        raise ValueError(f"未在 {mot_path} 中找到关节角列")
 
     if output_path is None:
         output_path = mot_path.with_name(f"{mot_path.stem}_joint_angles.html")
@@ -219,7 +219,7 @@ def export_html(
         video_uri = Path(video_path).resolve().as_uri()
         video_tag = (
             f'<video id="motionVideo" controls preload="metadata" src="{html.escape(video_uri)}">'
-            "Your browser cannot play this video."
+            "你的浏览器无法播放该视频。"
             "</video>"
         )
 
@@ -241,7 +241,7 @@ def export_html(
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{html.escape(mot_path.stem)} joint angles</title>
+  <title>{html.escape(mot_path.stem)} 关节角</title>
   <style>
     body {{ margin: 0; font-family: Arial, sans-serif; color: #1f2933; background: #f7f8fa; }}
     header {{ padding: 16px 24px; background: #ffffff; border-bottom: 1px solid #d9dee7; }}
@@ -262,17 +262,17 @@ def export_html(
 <body>
   <header>
     <h1>{html.escape(mot_path.name)}</h1>
-    <div class="meta">Hover on the graph to inspect all joint angles at the nearest time and sync the video.</div>
+    <div class="meta">把鼠标放在曲线上，可查看最接近时刻的所有关节角，并同步视频时间。</div>
   </header>
   {warning_html}
   <main>
     <section id="plotPanel">{fig_div}</section>
     <aside id="sidePanel">
       {video_tag}
-      <div class="meta" id="currentTime">Time: {times[0]:.3f}s</div>
+      <div class="meta" id="currentTime">时间：{times[0]:.3f} 秒</div>
       <div class="tableWrap">
         <table>
-          <thead><tr><th>Joint</th><th>Angle</th></tr></thead>
+          <thead><tr><th>关节/坐标</th><th>角度</th></tr></thead>
           <tbody id="angleTable"></tbody>
         </table>
       </div>
@@ -302,7 +302,7 @@ def export_html(
     function updateTable(index) {{
       const row = payload.rows[index];
       const timeValue = row[payload.timeColumn];
-      currentTime.textContent = `Time: ${{timeValue.toFixed(3)}}s`;
+      currentTime.textContent = `时间：${{timeValue.toFixed(3)}} 秒`;
       tableBody.innerHTML = payload.angleColumns.map((name) => {{
         const value = row[name];
         const text = value === null ? 'NaN' : value.toFixed(2);
@@ -345,18 +345,18 @@ def export_project_reports(project_dir: Path, video_path: Path | None = None) ->
         html_path, _ = export_html(mot_file, video_path, output_dir / f"{mot_file.stem}_joint_angles.html")
         outputs.append(html_path)
     if not outputs:
-        raise FileNotFoundError(f"No kinematics .mot files found in {project_dir}")
+        raise FileNotFoundError(f"未在 {project_dir} 中找到 kinematics/*.mot 文件")
     return outputs
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Generate HTML and Excel reports from Pose2Sim .mot files.")
-    parser.add_argument("--project", help="Pose2Sim project directory. Generates reports for all kinematics/*.mot files.")
-    parser.add_argument("--mot", help="Single .mot file to export.")
-    parser.add_argument("--video", help="Optional video file for HTML synchronization.")
-    parser.add_argument("--html", help="Optional HTML output path for --mot.")
-    parser.add_argument("--excel", help="Optional Excel output path for --mot.")
-    parser.add_argument("--no-transcode", action="store_true", help="Do not attempt browser MP4 conversion.")
+    parser = argparse.ArgumentParser(description="从 Pose2Sim .mot 文件生成 HTML 和 Excel 报告。")
+    parser.add_argument("--project", help="Pose2Sim 项目文件夹；会为所有 kinematics/*.mot 生成报告。")
+    parser.add_argument("--mot", help="要导出的单个 .mot 文件。")
+    parser.add_argument("--video", help="HTML 报告中用于同步显示的可选视频文件。")
+    parser.add_argument("--html", help="--mot 模式下可选的 HTML 输出路径。")
+    parser.add_argument("--excel", help="--mot 模式下可选的 Excel 输出路径。")
+    parser.add_argument("--no-transcode", action="store_true", help="不尝试转换为浏览器兼容 MP4。")
     return parser
 
 
@@ -374,20 +374,20 @@ def main(argv: list[str] | None = None) -> int:
                 Path(args.html) if args.html else None,
                 transcode_video=not args.no_transcode,
             )
-            print(f"Excel report: {excel_path}")
-            print(f"HTML report: {html_path}")
+            print(f"Excel 报告：{excel_path}")
+            print(f"HTML 报告：{html_path}")
             for message in warnings:
-                print(f"Warning: {message}")
+                print(f"提示：{message}")
             return 0
         if args.project:
             outputs = export_project_reports(Path(args.project), video)
             for output in outputs:
                 print(output)
             return 0
-        parser.error("Provide --project or --mot")
+        parser.error("请提供 --project 或 --mot")
         return 2
     except Exception as exc:
-        print(f"ERROR: {exc}", file=sys.stderr)
+        print(f"错误：{exc}", file=sys.stderr)
         return 1
 
 

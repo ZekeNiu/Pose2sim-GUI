@@ -71,11 +71,11 @@ class ProjectStatus:
 
     def summary_lines(self) -> list[str]:
         return [
-            f"Project: {self.project_dir}",
-            f"Config.toml: {'found' if self.has_config else 'missing'}",
-            f"videos folder: {'found' if self.has_videos else 'missing'}",
-            f"calibration folder: {'found' if self.has_calibration else 'missing'}",
-            f"kinematics .mot files: {len(self.mot_files)}",
+            f"项目路径：{self.project_dir}",
+            f"Config.toml：{'已找到' if self.has_config else '缺失'}",
+            f"videos 文件夹：{'已找到' if self.has_videos else '缺失'}",
+            f"calibration 文件夹：{'已找到' if self.has_calibration else '缺失'}",
+            f"kinematics .mot 文件：{len(self.mot_files)} 个",
         ]
 
 
@@ -85,18 +85,29 @@ def demo_config_path() -> Path:
     package_dir = Path(Pose2Sim.__file__).resolve().parent
     demo_path = package_dir / "Demo_SinglePerson" / "Config.toml"
     if not demo_path.exists():
-        raise FileNotFoundError(f"Pose2Sim demo Config.toml not found at {demo_path}")
+        raise FileNotFoundError(f"未找到 Pose2Sim 示例 Config.toml：{demo_path}")
     return demo_path
 
 
 def copy_demo_config(project_dir: Path) -> Path:
     project_dir = Path(project_dir).resolve()
     project_dir.mkdir(parents=True, exist_ok=True)
+    ensure_standard_project_folders(project_dir)
     destination = project_dir / "Config.toml"
     if destination.exists():
-        raise FileExistsError(f"{destination} already exists")
+        raise FileExistsError(f"{destination} 已存在")
     shutil.copy2(demo_config_path(), destination)
     return destination
+
+
+def ensure_standard_project_folders(project_dir: Path) -> list[Path]:
+    project_dir = Path(project_dir).resolve()
+    created_or_existing: list[Path] = []
+    for name in ("videos", "calibration", "reports"):
+        folder = project_dir / name
+        folder.mkdir(parents=True, exist_ok=True)
+        created_or_existing.append(folder)
+    return created_or_existing
 
 
 def validate_toml_text(text: str) -> tuple[bool, str]:
@@ -104,13 +115,13 @@ def validate_toml_text(text: str) -> tuple[bool, str]:
         toml.loads(text)
     except Exception as exc:  # toml raises multiple parser exceptions.
         return False, str(exc)
-    return True, "TOML is valid."
+    return True, "TOML 语法正确。"
 
 
 def load_config(project_dir: Path) -> dict[str, Any]:
     config_path = Path(project_dir) / "Config.toml"
     if not config_path.exists():
-        raise FileNotFoundError(f"No Config.toml found in {Path(project_dir).resolve()}")
+        raise FileNotFoundError(f"未在 {Path(project_dir).resolve()} 中找到 Config.toml")
     return toml.load(config_path)
 
 
@@ -192,12 +203,12 @@ def apply_beginner_safety(config: dict[str, Any]) -> list[str]:
 
     for key in ("handle_LR_swap", "undistort_points"):
         if pose.get(key):
-            warnings.append(f"Disabled pose.{key}; it is not implemented safely in Pose2Sim yet.")
+            warnings.append(f"已关闭 pose.{key}；该功能在当前 Pose2Sim 中尚不适合新手安全启用。")
         pose[key] = False
 
     if pose.get("display_detection", True) and pose.get("parallel_workers_pose") not in (False, 0, 1):
         pose["parallel_workers_pose"] = False
-        warnings.append("Set pose.parallel_workers_pose=false because display_detection=true.")
+        warnings.append("因为 display_detection=true，已将 pose.parallel_workers_pose 设为 false。")
 
     extrinsics = (
         config.setdefault("calibration", {})
@@ -205,17 +216,17 @@ def apply_beginner_safety(config: dict[str, Any]) -> list[str]:
         .setdefault("extrinsics", {})
     )
     if extrinsics.get("moving_cameras"):
-        warnings.append("Disabled calibration moving_cameras; it is not implemented yet.")
+        warnings.append("已关闭 moving_cameras；当前 Pose2Sim 尚未实现移动相机校准。")
     extrinsics["moving_cameras"] = False
 
     if extrinsics.get("extrinsics_method") == "keypoints":
         extrinsics["extrinsics_method"] = "scene"
-        warnings.append("Changed extrinsics_method from keypoints to scene; keypoints is not ready.")
+        warnings.append("已把 extrinsics_method 从 keypoints 改为 scene；keypoints 外参校准仍未完成。")
 
     mode = pose.get("mode", "balanced")
     if isinstance(mode, str) and mode.strip().startswith("{"):
         pose["mode"] = "balanced"
-        warnings.append("Reset custom pose.mode dictionary to balanced in beginner mode.")
+        warnings.append("新手模式不开放自定义 pose.mode 字典，已重置为 balanced。")
 
     return warnings
 
@@ -224,5 +235,5 @@ def selected_stages_to_runall_kwargs(stages: Iterable[str]) -> dict[str, bool]:
     selected = set(stages)
     unknown = selected.difference(STAGES)
     if unknown:
-        raise ValueError(f"Unknown stages: {', '.join(sorted(unknown))}")
+        raise ValueError(f"未知流程步骤：{', '.join(sorted(unknown))}")
     return {flag: stage in selected for stage, flag in RUNALL_FLAGS.items()}

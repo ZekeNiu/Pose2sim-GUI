@@ -29,7 +29,10 @@ kinematics/
 
 # Local IDE and OS files
 work/
+input/
+output/
 outputs/
+user_projects/
 .vscode/
 .idea/
 Thumbs.db
