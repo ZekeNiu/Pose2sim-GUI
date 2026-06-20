@@ -8,7 +8,14 @@ import unittest
 
 from openpyxl import load_workbook
 
-from pose2sim_gui.reports import export_excel, export_html, find_report_video_files, read_mot, split_motion_columns
+from pose2sim_gui.reports import (
+    coordinate_infos_for_columns,
+    export_excel,
+    export_html,
+    find_report_video_files,
+    read_mot,
+    split_motion_columns,
+)
 
 
 MOT_TEXT = """Coordinates
@@ -46,7 +53,7 @@ class ReportTests(unittest.TestCase):
             try:
                 self.assertEqual(set(workbook.sheetnames), {"关节活动度", "平移坐标", "统计摘要"})
                 self.assertEqual(workbook["关节活动度"]["A1"].value, "时间（秒）")
-                self.assertEqual(workbook["关节活动度"]["B1"].value, "右髋关节屈伸")
+                self.assertEqual(workbook["关节活动度"]["B1"].value, "右髋关节屈伸活动度")
                 self.assertEqual(workbook["平移坐标"]["B1"].value, "pelvis_tx")
                 self.assertEqual(workbook["统计摘要"]["A1"].value, "指标")
             finally:
@@ -67,17 +74,39 @@ class ReportTests(unittest.TestCase):
             self.assertIn("Plotly.newPlot", html)
             self.assertEqual(html.count("<video"), 2)
             self.assertIn("media/01_cam01_pose.mp4", html)
+            self.assertIn('type="video/mp4"', html)
             self.assertIn("plotly_hover", html)
-            self.assertIn("右髋关节屈伸", html)
+            self.assertIn("右髋关节屈伸活动度", html)
             self.assertIn("当前时刻关节活动度", html)
             self.assertIn("完整统计表", html)
             self.assertIn("查看完整诊断", html)
+            self.assertIn('class="video-grid video-count-2"', html)
+            self.assertNotIn("metric-toggle", html)
+            self.assertNotIn("select-action", html)
             payload_match = re.search(r'<script id="motionData" type="application/json">(.*?)</script>', html, re.S)
             self.assertIsNotNone(payload_match)
             payload = json.loads(payload_match.group(1))
             self.assertEqual(payload["translationColumns"], ["pelvis_tx"])
             self.assertNotIn("pelvis_tx", payload["angleColumns"])
-            self.assertEqual(payload["labels"]["knee_angle_r"], "右膝关节屈伸")
+            self.assertEqual(payload["labels"]["knee_angle_r"], "右膝关节屈伸活动度")
+
+    def test_coordinate_labels_are_complete_and_strict(self) -> None:
+        infos = coordinate_infos_for_columns(
+            ["hip_flexion_l", "hip_flexion_r", "knee_angle_l", "knee_angle_r", "flexion_l"]
+        )
+        labels = [info["label"] for info in infos.values()]
+        self.assertIn("左髋关节屈伸活动度", labels)
+        self.assertIn("右髋关节屈伸活动度", labels)
+        self.assertIn("左膝关节屈伸活动度", labels)
+        self.assertIn("右膝关节屈伸活动度", labels)
+        self.assertEqual(infos["flexion_l"]["label"], "左未识别活动度 1")
+        self.assertFalse(infos["flexion_l"]["recognized"])
+        self.assertNotIn("屈伸活动度", infos["flexion_l"]["label"])
+
+    def test_duplicate_labels_are_numbered(self) -> None:
+        infos = coordinate_infos_for_columns(["knee_angle_l", "left_knee_angle"])
+        self.assertEqual(infos["knee_angle_l"]["label"], "左膝关节屈伸活动度（1）")
+        self.assertEqual(infos["left_knee_angle"]["label"], "左膝关节屈伸活动度（2）")
 
     def test_find_report_video_files_prefers_processed_videos(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
