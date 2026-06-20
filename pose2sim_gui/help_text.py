@@ -22,8 +22,8 @@ HELP_TEXTS: dict[str, str] = {
     "create_folders": (
         "创建 Pose2Sim 推荐的标准项目文件夹：videos、calibration、reports。"
         "其中 videos 和 calibration 是 Pose2Sim 输入；reports 仅作为项目内备用记录目录。"
-        "本 GUI 会另外在软件目录下创建 input/ 和 output/；新建项目默认建议放入 input/projects，"
-        "Pose2Sim 结果镜像到 output/pose2sim_results，HTML 和 Excel 报告输出到 output/reports。"
+        "本 GUI 会另外在软件目录下创建 input/ 和 output/；新建项目默认建议放入 output/pose2sim_results。"
+        "HTML 和 Excel 报告会保存在同一项目结果文件夹的 reports/ 子目录。"
     ),
     "import_videos": (
         "把已经录制好的多机位视频复制到当前项目的 videos/ 文件夹。Pose2Sim 支持处理录制好的视频，"
@@ -101,14 +101,12 @@ MANUAL_TEXT = """
 
 本 GUI 会在软件目录 `D:\\Application\\Biomechanics\\Pose2sim` 下自动创建：
 
-- `input/`：用户素材和新建项目的推荐存放位置。
-- `input/projects/`：用示例配置新建项目时的推荐位置。
+- `input/`：用户原始视频、校准素材等输入文件的暂存位置。
 - `input/videos/`：导入视频时的默认选择位置，可作为原始视频暂存区。
 - `input/calibration/`：校准素材暂存区。
-- `output/reports/`：Excel 和 HTML 报告的集中输出位置。
-- `output/pose2sim_results/`：Pose2Sim 结果镜像位置，包含 `pose/`、`pose-sync/`、`pose-associated/`、`pose-3d/`、`kinematics/` 等。
+- `output/pose2sim_results/`：GUI 新建项目和 Pose2Sim 结果的集中位置，包含 `pose/`、`pose-sync/`、`pose-associated/`、`pose-3d/`、`kinematics/` 和 `reports/`。
 
-Pose2Sim 本身仍然读取每个项目内的 `videos/` 与 `calibration/`，并先在项目中生成 `pose/`、`pose-sync/`、`pose-associated/`、`pose-3d/`、`kinematics/`。GUI 会在流程结束后把这些结果同步到 `output/pose2sim_results/<项目名>/`，并把报告放到 `output/reports/<项目名>/`。
+Pose2Sim 本身仍然读取每个项目内的 `videos/` 与 `calibration/`。GUI 新建项目默认就在 `output/pose2sim_results/<项目名>/`，因此 Pose2Sim 结果会直接生成在那里，报告放在同一项目的 `reports/` 子目录。若打开外部项目，GUI 会同步一份结果到 `output/pose2sim_results/<项目名>/`，但不会自动删除外部项目中的原始结果。
 
 ## 2. 录制好的视频是否支持
 

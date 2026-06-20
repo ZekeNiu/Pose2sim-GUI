@@ -63,8 +63,8 @@ from .workspace import (
     APP_ROOT,
     INPUT_DIR,
     OUTPUT_DIR,
-    PROJECTS_DIR,
     RAW_VIDEO_DIR,
+    RESULTS_DIR,
     ensure_app_workspace,
     mirror_pose2sim_outputs,
     project_results_dir,
@@ -288,9 +288,8 @@ class Pose2SimMainWindow(QMainWindow):
         workspace_text = QLabel(
             f"软件目录：{APP_ROOT}\n"
             f"输入暂存：{INPUT_DIR}\n"
-            f"报告输出：{OUTPUT_DIR}\\reports\n"
-            f"Pose2Sim 结果镜像：{OUTPUT_DIR}\\pose2sim_results\n"
-            "新建项目默认建议放在 input/projects；流程结束后会把 Pose2Sim 结果和报告都集中到 output。"
+            f"结果与报告：{OUTPUT_DIR}\\pose2sim_results\n"
+            "新建项目默认建议直接放在 output/pose2sim_results；报告会放在项目结果文件夹的 reports 子目录。"
         )
         workspace_text.setWordWrap(True)
         workspace_text.setObjectName("HelpText")
@@ -312,7 +311,7 @@ class Pose2SimMainWindow(QMainWindow):
         note = QLabel(
             "推荐结构：Config.toml、videos/、calibration/。录制好的视频放入 videos/；校准文件或校准素材放入 calibration/；"
             "Pose2Sim 会自动生成 pose/、pose-sync/、pose-associated/、pose-3d/、kinematics/；"
-            "本 GUI 会把这些结果镜像到 output/pose2sim_results/，并把报告放入 output/reports/。"
+            "本 GUI 会把这些结果集中到 output/pose2sim_results/<项目名>/，报告放在其中的 reports/ 子目录。"
         )
         note.setWordWrap(True)
         note.setObjectName("HelpText")
@@ -743,13 +742,13 @@ class Pose2SimMainWindow(QMainWindow):
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder)))
 
     def choose_project(self) -> None:
-        start_dir = str(self.project_dir or PROJECTS_DIR)
+        start_dir = str(self.project_dir or RESULTS_DIR)
         folder = QFileDialog.getExistingDirectory(self, "选择 Pose2Sim 项目文件夹", start_dir)
         if folder:
             self.load_project(Path(folder))
 
     def create_project_from_demo(self) -> None:
-        folder = QFileDialog.getExistingDirectory(self, "选择新 Pose2Sim 项目文件夹", str(PROJECTS_DIR))
+        folder = QFileDialog.getExistingDirectory(self, "选择新 Pose2Sim 项目文件夹", str(RESULTS_DIR))
         if not folder:
             return
         try:

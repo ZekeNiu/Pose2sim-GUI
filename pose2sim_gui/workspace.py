@@ -8,10 +8,8 @@ import shutil
 APP_ROOT = Path(__file__).resolve().parents[1]
 INPUT_DIR = APP_ROOT / "input"
 OUTPUT_DIR = APP_ROOT / "output"
-PROJECTS_DIR = INPUT_DIR / "projects"
 RAW_VIDEO_DIR = INPUT_DIR / "videos"
 RAW_CALIBRATION_DIR = INPUT_DIR / "calibration"
-REPORTS_DIR = OUTPUT_DIR / "reports"
 RESULTS_DIR = OUTPUT_DIR / "pose2sim_results"
 POSE2SIM_RESULT_DIR_NAMES = (
     "calibration",
@@ -33,10 +31,8 @@ def ensure_app_workspace() -> dict[str, Path]:
         "app": APP_ROOT,
         "input": INPUT_DIR,
         "output": OUTPUT_DIR,
-        "projects": PROJECTS_DIR,
         "raw_videos": RAW_VIDEO_DIR,
         "raw_calibration": RAW_CALIBRATION_DIR,
-        "reports": REPORTS_DIR,
         "results": RESULTS_DIR,
     }
     for folder in folders.values():
@@ -50,9 +46,7 @@ def safe_folder_name(value: str) -> str:
 
 
 def project_report_dir(project_dir: Path) -> Path:
-    ensure_app_workspace()
-    project_dir = Path(project_dir).resolve()
-    output_dir = REPORTS_DIR / safe_folder_name(project_dir.name)
+    output_dir = project_results_dir(project_dir) / "reports"
     output_dir.mkdir(parents=True, exist_ok=True)
     return output_dir
 
@@ -77,6 +71,9 @@ def mirror_pose2sim_outputs(project_dir: Path) -> list[Path]:
         if not source.exists():
             continue
         destination = output_dir / name
+        if source.resolve() == destination.resolve():
+            copied.append(destination)
+            continue
         if destination.exists():
             shutil.rmtree(destination)
         shutil.copytree(source, destination)
@@ -87,7 +84,8 @@ def mirror_pose2sim_outputs(project_dir: Path) -> list[Path]:
         source = project_dir / name
         if source.is_file():
             destination = output_dir / source.name
-            shutil.copy2(source, destination)
+            if source.resolve() != destination.resolve():
+                shutil.copy2(source, destination)
             copied.append(destination)
             copied_files.add(source.resolve())
 
@@ -95,7 +93,8 @@ def mirror_pose2sim_outputs(project_dir: Path) -> list[Path]:
         if source.resolve() in copied_files:
             continue
         destination = output_dir / source.name
-        shutil.copy2(source, destination)
+        if source.resolve() != destination.resolve():
+            shutil.copy2(source, destination)
         copied.append(destination)
 
     return copied

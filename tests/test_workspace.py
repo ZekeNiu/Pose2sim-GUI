@@ -8,6 +8,23 @@ import pose2sim_gui.workspace as workspace
 
 
 class WorkspaceTests(unittest.TestCase):
+    def test_project_report_dir_lives_inside_project_results_dir(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            project = root / "project"
+            project.mkdir()
+
+            original_results_dir = workspace.RESULTS_DIR
+            workspace.RESULTS_DIR = root / "output" / "pose2sim_results"
+            try:
+                result_dir = workspace.project_results_dir(project)
+                report_dir = workspace.project_report_dir(project)
+            finally:
+                workspace.RESULTS_DIR = original_results_dir
+
+            self.assertEqual(report_dir, result_dir / "reports")
+            self.assertTrue(report_dir.exists())
+
     def test_mirror_pose2sim_outputs_copies_result_dirs_without_videos(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -36,6 +53,26 @@ class WorkspaceTests(unittest.TestCase):
             self.assertTrue((result_dir / "pose-3d" / "trial.trc").exists())
             self.assertTrue((result_dir / "Config.toml").exists())
             self.assertFalse((result_dir / "videos" / "raw.mp4").exists())
+
+    def test_mirror_pose2sim_outputs_does_not_delete_project_already_in_results(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            original_results_dir = workspace.RESULTS_DIR
+            workspace.RESULTS_DIR = root / "output" / "pose2sim_results"
+            try:
+                project = workspace.RESULTS_DIR / "project"
+                (project / "kinematics").mkdir(parents=True)
+                mot = project / "kinematics" / "trial.mot"
+                mot.write_text("mot", encoding="utf-8")
+                (project / "Config.toml").write_text("[project]\n", encoding="utf-8")
+
+                copied = workspace.mirror_pose2sim_outputs(project)
+            finally:
+                workspace.RESULTS_DIR = original_results_dir
+
+            self.assertTrue(copied)
+            self.assertTrue(mot.exists())
+            self.assertEqual(mot.read_text(encoding="utf-8"), "mot")
 
 
 if __name__ == "__main__":
