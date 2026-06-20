@@ -61,6 +61,92 @@ from .help_text import HELP_TEXTS, MANUAL_TEXT, STAGE_LABELS
 from .reports import default_report_dir, export_excel, export_html, find_mot_files, find_video_files
 
 
+POSE_MODEL_OPTIONS = [
+    ("身体+足部（默认，Body_with_feet）", "Body_with_feet"),
+    ("全身+腕部（Whole_body_wrist）", "Whole_body_wrist"),
+    ("全身含手脸（Whole_body）", "Whole_body"),
+    ("下肢（Lower_body）", "Lower_body"),
+    ("身体17点（Body）", "Body"),
+    ("手部（Hand）", "Hand"),
+    ("面部（Face）", "Face"),
+    ("动物（Animal）", "Animal"),
+]
+
+POSE_MODE_OPTIONS = [
+    ("轻量：最快，精度较低（lightweight）", "lightweight"),
+    ("均衡：推荐默认（balanced）", "balanced"),
+    ("高性能：较慢，通常更稳（performance）", "performance"),
+]
+
+DEVICE_OPTIONS = [
+    ("自动选择（auto）", "auto"),
+    ("CPU：兼容性最好", "CPU"),
+    ("NVIDIA GPU（CUDA）", "CUDA"),
+    ("Apple GPU（MPS）", "MPS"),
+    ("AMD GPU（ROCM）", "ROCM"),
+]
+
+BACKEND_OPTIONS = [
+    ("自动选择（auto）", "auto"),
+    ("OpenVINO：常适合 CPU", "openvino"),
+    ("ONNX Runtime：兼容性好", "onnxruntime"),
+    ("OpenCV 后端", "opencv"),
+]
+
+SAVE_VIDEO_OPTIONS = [
+    ("保存为视频（to_video）", "to_video"),
+    ("保存为逐帧图片（to_images）", "to_images"),
+    ("不保存叠加结果（none）", "none"),
+]
+
+TRACKING_OPTIONS = [
+    ("Sports2D 跟踪：推荐默认（sports2d）", "sports2d"),
+    ("不跟踪（none）", "none"),
+    ("DeepSORT：拥挤场景更稳但更慢（deepsort）", "deepsort"),
+]
+
+CALIBRATION_TYPE_OPTIONS = [
+    ("转换已有校准文件（convert）", "convert"),
+    ("从素材计算校准（calculate）", "calculate"),
+]
+
+CONVERT_FROM_OPTIONS = [
+    ("Qualisys", "qualisys"),
+    ("Caliscope", "caliscope"),
+    ("OptiTrack", "optitrack"),
+    ("Vicon", "vicon"),
+    ("OpenCap", "opencap"),
+    ("EasyMocap", "easymocap"),
+    ("bioCV", "biocv"),
+    ("Anipose", "anipose"),
+    ("FreeMoCap", "freemocap"),
+]
+
+EXTRINSICS_OPTIONS = [
+    ("场景已知点：推荐（scene）", "scene"),
+    ("地面棋盘格（board）", "board"),
+]
+
+INTERPOLATION_OPTIONS = [
+    ("线性：推荐默认（linear）", "linear"),
+    ("一阶样条（slinear）", "slinear"),
+    ("二次插值（quadratic）", "quadratic"),
+    ("三次插值（cubic）", "cubic"),
+    ("不插值（none）", "none"),
+]
+
+FILTER_TYPE_OPTIONS = [
+    ("Butterworth：生物力学常用（butterworth）", "butterworth"),
+    ("Kalman：适合实时估计（kalman）", "kalman"),
+    ("One Euro：快速自适应（one_euro）", "one_euro"),
+    ("GCV 样条：自动平滑（gcv_spline）", "gcv_spline"),
+    ("Gaussian：高斯平滑（gaussian）", "gaussian"),
+    ("LOESS：局部回归（LOESS）", "LOESS"),
+    ("Median：中值滤波（median）", "median"),
+    ("速度 Butterworth（butterworth_on_speed）", "butterworth_on_speed"),
+]
+
+
 class Pose2SimMainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
@@ -206,10 +292,18 @@ class Pose2SimMainWindow(QMainWindow):
         outer.addTab(self._build_advanced_parameters(), "高级 TOML")
         return outer
 
-    def _combo(self, values: tuple[str, ...] | list[str]) -> QComboBox:
+    def _combo(self, values: tuple[str, ...] | list[str] | list[tuple[str, str]]) -> QComboBox:
         combo = QComboBox()
-        combo.addItems(list(values))
+        for item in values:
+            if isinstance(item, tuple):
+                combo.addItem(item[0], item[1])
+            else:
+                combo.addItem(str(item), item)
         return combo
+
+    def _combo_value(self, combo: QComboBox) -> str:
+        data = combo.currentData()
+        return str(data if data is not None else combo.currentText())
 
     def _build_beginner_parameters(self) -> QWidget:
         page = QWidget()
@@ -238,14 +332,14 @@ class Pose2SimMainWindow(QMainWindow):
 
         pose_group = QGroupBox("二维姿态识别")
         pose_form = QFormLayout(pose_group)
-        self.pose_model = self._combo(POSE_MODELS)
-        self.pose_mode = self._combo(POSE_MODES)
-        self.device = self._combo(DEVICES)
-        self.backend = self._combo(BACKENDS)
+        self.pose_model = self._combo(POSE_MODEL_OPTIONS)
+        self.pose_mode = self._combo(POSE_MODE_OPTIONS)
+        self.device = self._combo(DEVICE_OPTIONS)
+        self.backend = self._combo(BACKEND_OPTIONS)
         self.display_detection = QCheckBox("启用")
         self.overwrite_pose = QCheckBox("启用")
-        self.save_video = self._combo(["to_video", "to_images", "none"])
-        self.tracking_mode = self._combo(TRACKING_MODES)
+        self.save_video = self._combo(SAVE_VIDEO_OPTIONS)
+        self.tracking_mode = self._combo(TRACKING_OPTIONS)
         self.det_frequency = QSpinBox()
         self.det_frequency.setRange(1, 9999)
         self.average_likelihood = QDoubleSpinBox()
@@ -268,12 +362,10 @@ class Pose2SimMainWindow(QMainWindow):
         self.synchronization_gui = QCheckBox("启用")
         self.display_sync_plots = QCheckBox("启用")
         self.save_sync_plots = QCheckBox("启用")
-        self.calibration_type = self._combo(["convert", "calculate"])
-        self.convert_from = self._combo(
-            ["qualisys", "caliscope", "optitrack", "vicon", "opencap", "easymocap", "biocv", "anipose", "freemocap"]
-        )
+        self.calibration_type = self._combo(CALIBRATION_TYPE_OPTIONS)
+        self.convert_from = self._combo(CONVERT_FROM_OPTIONS)
         self.intrinsics_extension = QLineEdit()
-        self.extrinsics_method = self._combo(["scene", "board"])
+        self.extrinsics_method = self._combo(EXTRINSICS_OPTIONS)
         self._add_info_row(sync_form, "同步交互窗口", self.synchronization_gui, "synchronization_gui")
         self._add_info_row(sync_form, "显示同步图", self.display_sync_plots, "display_sync_plots")
         self._add_info_row(sync_form, "保存同步图", self.save_sync_plots, "save_sync_plots")
@@ -294,7 +386,7 @@ class Pose2SimMainWindow(QMainWindow):
         self.reproj_triangulation.setSuffix(" px")
         self.min_cameras = QSpinBox()
         self.min_cameras.setRange(2, 64)
-        self.interpolation = self._combo(["linear", "slinear", "quadratic", "cubic", "none"])
+        self.interpolation = self._combo(INTERPOLATION_OPTIONS)
         self._add_info_row(assoc_form, "跟踪关键点", self.tracked_keypoint, "tracked_keypoint")
         self._add_info_row(assoc_form, "人物匹配重投影误差", self.reproj_assoc, "reproj_assoc")
         self._add_info_row(assoc_form, "三维重建重投影误差", self.reproj_triangulation, "reproj_triangulation")
@@ -306,7 +398,7 @@ class Pose2SimMainWindow(QMainWindow):
         filtering_form = QFormLayout(filtering_group)
         self.reject_outliers = QCheckBox("启用")
         self.filter_enabled = QCheckBox("启用")
-        self.filter_type = self._combo(FILTER_TYPES)
+        self.filter_type = self._combo(FILTER_TYPE_OPTIONS)
         self.filter_cutoff = QDoubleSpinBox()
         self.filter_cutoff.setRange(0.0, 1000.0)
         self.filter_cutoff.setSuffix(" Hz")
@@ -662,7 +754,9 @@ class Pose2SimMainWindow(QMainWindow):
 
     def _set_combo_value(self, combo: QComboBox, value: Any) -> None:
         text = str(value)
-        index = combo.findText(text)
+        index = combo.findData(text)
+        if index < 0:
+            index = combo.findText(text)
         if index >= 0:
             combo.setCurrentIndex(index)
         else:
@@ -678,34 +772,34 @@ class Pose2SimMainWindow(QMainWindow):
         set_nested(cfg, ["project", "frame_rate"], parse_toml_value(self.frame_rate.text()))
         set_nested(cfg, ["project", "frame_range"], parse_toml_value(self.frame_range.text()))
 
-        set_nested(cfg, ["pose", "pose_model"], self.pose_model.currentText())
-        set_nested(cfg, ["pose", "mode"], self.pose_mode.currentText())
-        set_nested(cfg, ["pose", "device"], self.device.currentText())
-        set_nested(cfg, ["pose", "backend"], self.backend.currentText())
+        set_nested(cfg, ["pose", "pose_model"], self._combo_value(self.pose_model))
+        set_nested(cfg, ["pose", "mode"], self._combo_value(self.pose_mode))
+        set_nested(cfg, ["pose", "device"], self._combo_value(self.device))
+        set_nested(cfg, ["pose", "backend"], self._combo_value(self.backend))
         set_nested(cfg, ["pose", "det_frequency"], self.det_frequency.value())
         set_nested(cfg, ["pose", "average_likelihood_threshold_pose"], self.average_likelihood.value())
         set_nested(cfg, ["pose", "display_detection"], self.display_detection.isChecked())
         set_nested(cfg, ["pose", "overwrite_pose"], self.overwrite_pose.isChecked())
-        set_nested(cfg, ["pose", "save_video"], self.save_video.currentText())
-        set_nested(cfg, ["pose", "tracking_mode"], self.tracking_mode.currentText())
+        set_nested(cfg, ["pose", "save_video"], self._combo_value(self.save_video))
+        set_nested(cfg, ["pose", "tracking_mode"], self._combo_value(self.tracking_mode))
 
         set_nested(cfg, ["synchronization", "synchronization_gui"], self.synchronization_gui.isChecked())
         set_nested(cfg, ["synchronization", "display_sync_plots"], self.display_sync_plots.isChecked())
         set_nested(cfg, ["synchronization", "save_sync_plots"], self.save_sync_plots.isChecked())
-        set_nested(cfg, ["calibration", "calibration_type"], self.calibration_type.currentText())
-        set_nested(cfg, ["calibration", "convert", "convert_from"], self.convert_from.currentText())
+        set_nested(cfg, ["calibration", "calibration_type"], self._combo_value(self.calibration_type))
+        set_nested(cfg, ["calibration", "convert", "convert_from"], self._combo_value(self.convert_from))
         set_nested(cfg, ["calibration", "calculate", "intrinsics", "intrinsics_extension"], self.intrinsics_extension.text().strip() or "jpg")
-        set_nested(cfg, ["calibration", "calculate", "extrinsics", "extrinsics_method"], self.extrinsics_method.currentText())
+        set_nested(cfg, ["calibration", "calculate", "extrinsics", "extrinsics_method"], self._combo_value(self.extrinsics_method))
 
         set_nested(cfg, ["personAssociation", "single_person", "tracked_keypoint"], self.tracked_keypoint.text().strip() or "Neck")
         set_nested(cfg, ["personAssociation", "single_person", "reproj_error_threshold_association"], self.reproj_assoc.value())
         set_nested(cfg, ["triangulation", "reproj_error_threshold_triangulation"], self.reproj_triangulation.value())
         set_nested(cfg, ["triangulation", "min_cameras_for_triangulation"], self.min_cameras.value())
-        set_nested(cfg, ["triangulation", "interpolation"], self.interpolation.currentText())
+        set_nested(cfg, ["triangulation", "interpolation"], self._combo_value(self.interpolation))
 
         set_nested(cfg, ["filtering", "reject_outliers"], self.reject_outliers.isChecked())
         set_nested(cfg, ["filtering", "filter"], self.filter_enabled.isChecked())
-        set_nested(cfg, ["filtering", "type"], self.filter_type.currentText())
+        set_nested(cfg, ["filtering", "type"], self._combo_value(self.filter_type))
         set_nested(cfg, ["filtering", "butterworth", "cut_off_frequency"], self.filter_cutoff.value())
         set_nested(cfg, ["filtering", "butterworth", "order"], self.filter_order.value())
         set_nested(cfg, ["filtering", "display_figures"], self.display_figures.isChecked())
